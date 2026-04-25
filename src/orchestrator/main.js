@@ -11,13 +11,13 @@
 
 "use strict";
 
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const { createInterface } = require("node:readline");
 const { randomUUID } = require("node:crypto");
 const https = require("node:https");
-const keytar = require("keytar");
 
 // ── Inline Python bridge (lightweight — for IPC handlers only) ───────────────
 // The full typed PythonBridge class lives in src/orchestrator/python-bridge.ts
@@ -30,8 +30,25 @@ let pythonWorker = null;
 const pythonPending = new Map();
 
 function getPythonPath() {
-  // Use env override or fall back to python3 on PATH.
-  return process.env["CAIRN_PYTHON"] ?? "python3";
+  if (process.env["CAIRN_PYTHON"]) return process.env["CAIRN_PYTHON"];
+  // Resolve strips PATH — check common macOS locations before falling back.
+  const candidates = [
+    "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+    "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+    "/usr/local/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "python3",
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      // ignore
+    }
+  }
+  return "python3";
 }
 
 function getBridgeScriptPath() {
@@ -179,9 +196,47 @@ async function getResolveSnapshot() {
   }
 }
 
-// ── Keychain ─────────────────────────────────────────────────────────────────
+// ── Key storage (safeStorage + encrypted JSON file) ──────────────────────────
+// safeStorage uses the OS keychain to derive an encryption key, then stores
+// the encrypted bytes in a file we manage. No native addon required.
 
-const KEYCHAIN_SERVICE = "com.aidanmascaro.cairn";
+function keysFilePath() {
+  return path.join(app.getPath("userData"), "keys.enc.json");
+}
+
+function readStoredKeys() {
+  const filePath = keysFilePath();
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const result = {};
+    for (const [k, v] of Object.entries(raw)) {
+      try {
+        result[k] = safeStorage.decryptString(Buffer.from(String(v), "base64"));
+      } catch {
+        // corrupted entry — skip
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredKey(name, value) {
+  const filePath = keysFilePath();
+  let current = {};
+  if (fs.existsSync(filePath)) {
+    try {
+      current = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch {
+      // ignore parse error — overwrite below
+    }
+  }
+  current[name] = safeStorage.encryptString(value).toString("base64");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(current), "utf8");
+}
 
 /**
  * Fire a HEAD/GET request and return the HTTP status code.
@@ -253,23 +308,21 @@ function registerIpc() {
     return callPython({ type: "echo", payload: String(payload) });
   });
 
-  ipcMain.handle("cairn:keys:get", async () => {
-    const [anthropic, assemblyai] = await Promise.all([
-      keytar.getPassword(KEYCHAIN_SERVICE, "ANTHROPIC_API_KEY"),
-      keytar.getPassword(KEYCHAIN_SERVICE, "ASSEMBLYAI_API_KEY"),
-    ]);
-    return { anthropic: anthropic ?? "", assemblyai: assemblyai ?? "" };
+  ipcMain.handle("cairn:keys:get", () => {
+    const stored = readStoredKeys();
+    return {
+      anthropic: stored["ANTHROPIC_API_KEY"] ?? "",
+      assemblyai: stored["ASSEMBLYAI_API_KEY"] ?? "",
+    };
   });
 
-  ipcMain.handle("cairn:keys:set", async (_event, payload) => {
-    const tasks = [];
+  ipcMain.handle("cairn:keys:set", (_event, payload) => {
     if (typeof payload.anthropic === "string" && payload.anthropic) {
-      tasks.push(keytar.setPassword(KEYCHAIN_SERVICE, "ANTHROPIC_API_KEY", payload.anthropic));
+      writeStoredKey("ANTHROPIC_API_KEY", payload.anthropic);
     }
     if (typeof payload.assemblyai === "string" && payload.assemblyai) {
-      tasks.push(keytar.setPassword(KEYCHAIN_SERVICE, "ASSEMBLYAI_API_KEY", payload.assemblyai));
+      writeStoredKey("ASSEMBLYAI_API_KEY", payload.assemblyai);
     }
-    await Promise.all(tasks);
     return { ok: true };
   });
 

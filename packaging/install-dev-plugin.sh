@@ -97,9 +97,13 @@ else
     exit 1
 fi
 
-# Native addon: Resolve's own file, copied (not symlinked — we want a stable reference
-# even if the user upgrades Resolve and the path shifts)
+# Native addon: Resolve's own file.
+# Copied to BOTH the install path and the project source dir.
+# The project source copy is needed because main.js is symlinked — Node.js
+# resolves require('./WorkflowIntegration.node') relative to the real file
+# location (project root), not the symlink location (install path).
 cp "$WORKFLOW_NODE" "$INSTALL_PATH/src/orchestrator/WorkflowIntegration.node"
+cp "$WORKFLOW_NODE" "$PROJECT_ROOT/src/orchestrator/WorkflowIntegration.node"
 
 # node_modules (Electron itself is required at runtime)
 if [[ -d "$PROJECT_ROOT/node_modules" ]]; then

@@ -55,3 +55,6 @@ assets/bin/ffprobe.exe
 coverage/
 .nyc_output/
 htmlcov/
+
+# Blackmagic native addon — populated by packaging/install-dev-plugin.sh
+src/orchestrator/WorkflowIntegration.node
