@@ -55,12 +55,12 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] Tag: `v0.0.1`
 
 ### Task 4: Node ↔ Python bridge
-- [ ] Create `src/orchestrator/python-bridge.ts` — spawns Python subprocess, JSON-per-line stdin/stdout protocol, message types typed with Zod schemas
-- [ ] Create `src/workers/bridge.py` — receives JSON messages, dispatches to handler by `type` field, responds with JSON
-- [ ] Implement an echo test: Node sends `{"type": "echo", "payload": "hello"}` → Python returns it with a timestamp → Node confirms roundtrip
-- [ ] Wire echo test to a temporary button in the plugin UI for visual confirmation
-- [ ] Test: `npm run test` includes a node-side integration test that spawns Python and exercises the echo
-- [ ] Commit: `feat: Node↔Python bridge with typed JSON protocol`
+- [x] Create `src/orchestrator/python-bridge.ts` — spawns Python subprocess, JSON-per-line stdin/stdout protocol, message types typed with Zod schemas
+- [x] Create `src/workers/bridge.py` — receives JSON messages, dispatches to handler by `type` field, responds with JSON
+- [x] Implement an echo test: Node sends `{"type": "echo", "payload": "hello"}` → Python returns it with a timestamp → Node confirms roundtrip
+- [x] Wire echo test to a temporary button in the plugin UI for visual confirmation
+- [x] Test: `npm run test` includes a node-side integration test that spawns Python and exercises the echo (5/5 pass)
+- [x] Commit: `feat: Node↔Python bridge with typed JSON protocol`
 
 ### Task 5: Install sensors
 - [ ] `tsconfig.json` with strict mode, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`

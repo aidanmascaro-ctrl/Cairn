@@ -16,7 +16,15 @@ export interface PingResult {
   chrome: string;
 }
 
+export interface EchoResult {
+  id: string;
+  type: "echo_response";
+  payload: string;
+  timestamp_iso: string;
+}
+
 export interface CairnBridge {
   getResolveSnapshot(): Promise<ResolveSnapshot>;
   ping(): Promise<PingResult>;
+  echo(payload: string): Promise<EchoResult>;
 }

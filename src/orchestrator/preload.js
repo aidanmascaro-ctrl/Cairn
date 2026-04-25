@@ -22,4 +22,11 @@ contextBridge.exposeInMainWorld('cairn', {
      * Electron/Node/Chrome versions for the Settings "About" panel.
      */
     ping: () => ipcRenderer.invoke('cairn:ping'),
+
+    /**
+     * Echo — sends a string to the Python worker and returns it with a
+     * timestamp. Temporary proof-of-life for the Node↔Python bridge.
+     * @param {string} payload
+     */
+    echo: (payload) => ipcRenderer.invoke('cairn:echo', payload),
 });

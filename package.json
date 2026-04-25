@@ -12,7 +12,7 @@
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint configured in Task 5'",
-    "test": "echo 'tests configured in Task 5'",
+    "test": "vitest run",
     "install-plugin": "bash packaging/install-dev-plugin.sh"
   },
   "devDependencies": {
@@ -24,7 +24,10 @@
     "svelte-check": "^3.7.1",
     "tslib": "^2.6.2",
     "typescript": "^5.4.5",
-    "vite": "^5.2.11"
+    "vite": "^5.2.11",
+    "vitest": "^4.1.5"
   },
-  "dependencies": {}
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
 }

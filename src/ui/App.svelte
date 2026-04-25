@@ -9,6 +9,9 @@
   let ping: PingResult | null = null;
   let error: string | null = null;
 
+  let echoResult: string | null = null;
+  let echoRunning = false;
+
   onMount(async () => {
     if (!cairn) {
       error = "window.cairn is not defined. Preload script did not run — check Electron setup.";
@@ -25,6 +28,20 @@
   async function refresh() {
     if (!cairn) return;
     snapshot = await cairn.getResolveSnapshot();
+  }
+
+  async function testEcho() {
+    if (!cairn || echoRunning) return;
+    echoRunning = true;
+    echoResult = null;
+    try {
+      const res = await cairn.echo("hello from Cairn");
+      echoResult = `✓ ${res.payload} — ${res.timestamp_iso}`;
+    } catch (err) {
+      echoResult = `✗ ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      echoRunning = false;
+    }
   }
 </script>
 
@@ -57,6 +74,16 @@
         <p class="details">{snapshot.error}</p>
       {/if}
       <button on:click={refresh}>Retry</button>
+    {/if}
+  </section>
+
+  <section class="card">
+    <h2>Python bridge</h2>
+    <button on:click={testEcho} disabled={echoRunning}>
+      {echoRunning ? "Sending…" : "Echo test"}
+    </button>
+    {#if echoResult}
+      <p class="echo-result">{echoResult}</p>
     {/if}
   </section>
 
@@ -151,5 +178,12 @@
     color: #9a9a9a;
     font-size: 0.88rem;
     margin-top: 0.25rem;
+  }
+  .echo-result {
+    margin-top: 0.75rem;
+    font-size: 0.88rem;
+    font-family: "SF Mono", ui-monospace, monospace;
+    color: #a8d8a8;
+    word-break: break-all;
   }
 </style>

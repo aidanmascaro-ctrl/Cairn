@@ -13,6 +13,77 @@
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { createInterface } = require('node:readline');
+const { randomUUID } = require('node:crypto');
+
+// ── Inline Python bridge (lightweight — for IPC handlers only) ───────────────
+// The full typed PythonBridge class lives in src/orchestrator/python-bridge.ts
+// and is used by the Node orchestration layer. Here we keep a single shared
+// worker process for IPC calls from the renderer.
+
+/** @type {import('node:child_process').ChildProcess|null} */
+let pythonWorker = null;
+/** @type {Map<string, {resolve: Function, reject: Function, timer: any}>} */
+const pythonPending = new Map();
+
+function getPythonPath() {
+    // Use env override or fall back to python3 on PATH.
+    return process.env['CAIRN_PYTHON'] ?? 'python3';
+}
+
+function getBridgeScriptPath() {
+    // main.js is at <plugin>/src/orchestrator/main.js; bridge.py is at <plugin>/src/workers/bridge.py
+    return path.join(__dirname, '..', 'workers', 'bridge.py');
+}
+
+function ensurePythonWorker() {
+    if (pythonWorker && pythonWorker.exitCode === null) return;
+
+    pythonWorker = spawn(getPythonPath(), [getBridgeScriptPath()], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const rl = createInterface({ input: pythonWorker.stdout });
+    rl.on('line', (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let msg;
+        try { msg = JSON.parse(trimmed); } catch { return; }
+        const pending = pythonPending.get(msg.id);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pythonPending.delete(msg.id);
+        pending.resolve(msg);
+    });
+
+    pythonWorker.stderr.on('data', (chunk) => {
+        process.stderr.write(`[bridge.py] ${chunk.toString()}`);
+    });
+
+    pythonWorker.on('exit', () => {
+        pythonWorker = null;
+        for (const [, p] of pythonPending) {
+            clearTimeout(p.timer);
+            p.reject(new Error('Python worker exited unexpectedly'));
+        }
+        pythonPending.clear();
+    });
+}
+
+/** @param {object} msg @returns {Promise<object>} */
+function callPython(msg) {
+    ensurePythonWorker();
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            pythonPending.delete(id);
+            reject(new Error('Python bridge call timed out'));
+        }, 10_000);
+        pythonPending.set(id, { resolve, reject, timer });
+        pythonWorker.stdin.write(JSON.stringify({ ...msg, id }) + '\n');
+    });
+}
 
 // WorkflowIntegration.node is a native Node addon shipped by Resolve.
 // In development we copy it alongside this file via packaging/install-dev-plugin.sh.
@@ -111,6 +182,9 @@ function registerIpc() {
         node: process.versions.node,
         chrome: process.versions.chrome,
     }));
+    ipcMain.handle('cairn:echo', async (_event, payload) => {
+        return callPython({ type: 'echo', payload: String(payload) });
+    });
 }
 
 function createMainWindow() {
