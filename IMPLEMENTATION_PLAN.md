@@ -1,15 +1,17 @@
 # IMPLEMENTATION PLAN — Session 1: Project Bootstrap
 
 ## Session Goal
+
 Establish repository structure, harness documents, per-stage specs, and plugin skeleton so Session 2 can begin implementing Stage 1 (ingest) against a working Electron + Python bridge.
 
 ---
 
 ## How This Works (Ralph Loop)
+
 Every session starts by loading this file. Work top-to-bottom. Mark tasks done as you go.
 At session end: archive completed items, carry forward anything unfinished, regenerate if stale.
 
-**Guides (feedforward):** CLAUDE.md → spec.md → specs/*.md → this file
+**Guides (feedforward):** CLAUDE.md → spec.md → specs/\*.md → this file
 **Sensors (feedback):** TypeScript compiler, pyrefly, ESLint, ruff, Vitest, pytest, LLM-as-judge
 
 ---
@@ -17,6 +19,7 @@ At session end: archive completed items, carry forward anything unfinished, rege
 ## Tasks
 
 ### Task 1: Repo scaffolding
+
 - [x] `git init` in project root
 - [x] Create folder tree matching `Project Structure` in CLAUDE.md:
   - `src/ui/`, `src/orchestrator/`, `src/orchestrator/prompts/`, `src/workers/`
@@ -29,8 +32,10 @@ At session end: archive completed items, carry forward anything unfinished, rege
 - [x] Copy the user's `organise.py` to the project root as reference (will later port to `src/workers/ingest.py`)
 - [x] Initial commit: `chore: harness scaffolding and docs`
 
-### Task 2: Decompose spec.md into /specs/*.md
+### Task 2: Decompose spec.md into /specs/\*.md
+
 The single `spec.md` is the product overview. Each pipeline stage needs its own detailed spec so Claude Code only loads what it needs per task. Each spec file must include: Purpose, Inputs, Outputs, Algorithm/Prompt, Sensors/Validations, Open Questions.
+
 - [x] `specs/overview.md` — distilled from spec.md: visual system, distribution architecture, out-of-scope, architecture diagram
 - [x] `specs/ingest.md` — three input modes, port of `organise.py`, Resolve bin creation, XML metadata extraction, proxy toggle
 - [x] `specs/classify.md` — Silero VAD thresholds, clip colour mapping, ambiguous review panel
@@ -40,10 +45,11 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] `specs/soundbites.md` — selection prompt with meta-reasoning block, marker colour mapping (green/red/blue/yellow), marker note format, in/out timecode precision
 - [x] `specs/matching.md` — literal vs thematic distinction, prompt design, Keywords/Shot/Description write strategy, confidence thresholds
 - [x] `specs/sidebar.md` — UI wireframe, story-map component, click-to-jump Resolve API call, B-roll preview panel
-- [x] Cross-check: every stage in spec.md has a matching specs/*.md file
+- [x] Cross-check: every stage in spec.md has a matching specs/\*.md file
 - [x] Commit: `docs: decompose spec.md into per-stage specs`
 
 ### Task 3: Electron plugin skeleton
+
 - [x] Clone `VilleOlof/Toolbox` to `/tmp/` as reference (do not vendor — study only)
 - [x] Create `manifest.xml` with plugin ID `com.aidanmascaro.cairn`, display name `Cairn`, version `0.0.1`
 - [x] Create `package.js` (Electron app entry) — implemented as `package.json` + `src/orchestrator/main.js` (standard Electron entry); manifest `FilePath` points to the main.js
@@ -55,6 +61,7 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] Tag: `v0.0.1`
 
 ### Task 4: Node ↔ Python bridge
+
 - [x] Create `src/orchestrator/python-bridge.ts` — spawns Python subprocess, JSON-per-line stdin/stdout protocol, message types typed with Zod schemas
 - [x] Create `src/workers/bridge.py` — receives JSON messages, dispatches to handler by `type` field, responds with JSON
 - [x] Implement an echo test: Node sends `{"type": "echo", "payload": "hello"}` → Python returns it with a timestamp → Node confirms roundtrip
@@ -63,15 +70,17 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] Commit: `feat: Node↔Python bridge with typed JSON protocol`
 
 ### Task 5: Install sensors
-- [ ] `tsconfig.json` with strict mode, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
-- [ ] `.eslintrc` + `.prettierrc` with shared config (no inline styles, no `any`, consistent imports)
-- [ ] `pyrefly` configured for `src/workers/` — blocks on type errors
-- [ ] `ruff.toml` configured — strict rule set, no TODO comments permitted in main (only in `fix_plan.md`)
-- [ ] Husky pre-commit hook running `tsc --noEmit && eslint && ruff check && pyrefly check` on staged files
-- [ ] GitHub Actions CI stub at `.github/workflows/ci.yml` — runs the same checks on every PR
-- [ ] Commit: `chore: install feedforward + feedback sensors`
+
+- [x] `tsconfig.json` with strict mode, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
+- [x] `eslint.config.mjs` + `.prettierrc` — no `any`, consistent imports, Svelte + TS flat config
+- [x] `pyrefly` configured for `src/workers/` — 0 errors confirmed
+- [x] `ruff.toml` configured — strict rule set, auto-fixed bridge.py
+- [x] Husky pre-commit hook with `lint-staged` — ESLint+Prettier on JS/TS, ruff on Python
+- [x] GitHub Actions CI stub at `.github/workflows/ci.yml`
+- [x] Commit: `chore: install feedforward + feedback sensors`
 
 ### Task 6: Settings and keychain
+
 - [ ] Create minimal Settings panel in UI (Svelte component)
 - [ ] Two fields: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY` (both password-masked)
 - [ ] Wire to `keytar` — write on save, read on plugin start
@@ -84,6 +93,7 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 ## Success Criteria for Session 1
 
 By end of session, this must be true:
+
 1. Repo is initialised, all harness docs in place
 2. `specs/*.md` exist for all eight pipeline stages
 3. Plugin loads in Resolve and can read the project name

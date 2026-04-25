@@ -39,6 +39,7 @@ MATCHES: clip_042 (literal), clip_081 (thematic), clip_113 (literal)
 ### Sidecars
 
 **B-roll sidecar append:**
+
 ```json
 {
   "matches": [
@@ -50,6 +51,7 @@ MATCHES: clip_042 (literal), clip_081 (thematic), clip_113 (literal)
 ```
 
 **A-roll sidecar append** (in the corresponding soundbite entry):
+
 ```json
 {
   "id": "sb_<clip>_001",
@@ -126,6 +128,7 @@ Writes `judge_score`. Matches with `judge_score < 0.6` are **dropped before writ
 ### 4. Write
 
 Order:
+
 1. **Sidecars first** — all B-roll and A-roll sidecars updated with final match sets.
 2. **Resolve writes** through the single serial worker:
    - For each B-roll clip: compute new `Shot` and `Description` strings from its aggregated matches; call `SetMetadata("Shot", …)` and `SetMetadata("Description", …)`. Do not touch `Keywords` (owned by Stage 4).
@@ -143,6 +146,7 @@ Caps prevent Resolve from truncating or looking cluttered in List View.
 ### 6. Idempotency
 
 Re-run strategy:
+
 - If sidecars already have `"matches"`, diff against newly proposed. Write only if changed.
 - Resolve fields are computed from the sidecar every time, so they stay consistent with the source of truth.
 

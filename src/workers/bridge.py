@@ -12,13 +12,13 @@ The Node side (src/orchestrator/python-bridge.ts) is the sole caller.
 from __future__ import annotations
 
 import json
-import sys
 import platform
-from datetime import datetime, timezone
+import sys
+from datetime import UTC, datetime
 from typing import Any
 
-
 # ── Handlers ──────────────────────────────────────────────────────────────────
+
 
 def handle_ping(msg: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -46,8 +46,9 @@ HANDLERS: dict[str, Any] = {
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _send(obj: dict[str, Any]) -> None:
@@ -88,7 +89,7 @@ def main() -> None:
         try:
             response = handler(msg)
             _send(response)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[bridge.py] Handler error for {msg_type!r}: {exc}", file=sys.stderr)
             _error(msg_id, str(exc))
 

@@ -46,25 +46,25 @@ Resolve Studio
 
 Two colour dimensions operate at different levels. They never collide.
 
-**Media pool clip colour** = what *kind* of clip it is:
+**Media pool clip colour** = what _kind_ of clip it is:
 
-| Category | Colour |
-|---|---|
-| A-ROLL | Blue |
-| B-ROLL | Green |
+| Category  | Colour |
+| --------- | ------ |
+| A-ROLL    | Blue   |
+| B-ROLL    | Green  |
 | AMBIGUOUS | Yellow |
-| PHOTOS | Purple |
-| ASSETS | Tan |
+| PHOTOS    | Purple |
+| ASSETS    | Tan    |
 
-**Timeline marker colour** (on A-roll clips only) = what *type of story beat* a soundbite is:
+**Timeline marker colour** (on A-roll clips only) = what _type of story beat_ a soundbite is:
 
-| Beat type | Colour |
-|---|---|
-| Origin / story | Green |
-| Emotional peak | Red |
-| Factual / informational | Blue |
-| Hook / attention-grabber | Yellow |
-| (additional types) | remaining Resolve marker colours |
+| Beat type                | Colour                           |
+| ------------------------ | -------------------------------- |
+| Origin / story           | Green                            |
+| Emotional peak           | Red                              |
+| Factual / informational  | Blue                             |
+| Hook / attention-grabber | Yellow                           |
+| (additional types)       | remaining Resolve marker colours |
 
 Resolve's accepted marker colours (from CLAUDE.md): Blue, Cyan, Green, Yellow, Red, Pink, Purple, Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream. Clip colours are a different enumerated set — per-stage specs must validate their chosen names against `SetClipColor` before writing.
 
@@ -79,17 +79,17 @@ Every piece of generated metadata lives in two synchronised places:
 
 Sidecar location: `<project>/04_EXPORT/.cairn/<clip-id>.json`. Schema versioned: `{"schema_version": 1, ...}`.
 
-| Data | Resolve field | Sidecar | Never |
-|---|---|---|---|
-| Classification (A/B/Ambiguous) | Keywords | `<clip>.json` | — |
-| Clip colour | SetClipColor | — (visual only) | — |
-| Transcript | Subtitle track | Full JSON + timestamps | — |
-| Visual tags | Keywords | Full tag set + confidence | — |
-| Match IDs | Shot | Full match data | — |
-| Free-text notes | Description | — | — |
-| Soundbite markers | Timeline markers | Marker audit log | — |
-| Project brief | — | `brief.json` | Resolve fields |
-| API keys | — | OS keychain via keytar | `.env`, code, sidecar |
+| Data                           | Resolve field    | Sidecar                   | Never                 |
+| ------------------------------ | ---------------- | ------------------------- | --------------------- |
+| Classification (A/B/Ambiguous) | Keywords         | `<clip>.json`             | —                     |
+| Clip colour                    | SetClipColor     | — (visual only)           | —                     |
+| Transcript                     | Subtitle track   | Full JSON + timestamps    | —                     |
+| Visual tags                    | Keywords         | Full tag set + confidence | —                     |
+| Match IDs                      | Shot             | Full match data           | —                     |
+| Free-text notes                | Description      | —                         | —                     |
+| Soundbite markers              | Timeline markers | Marker audit log          | —                     |
+| Project brief                  | —                | `brief.json`              | Resolve fields        |
+| API keys                       | —                | OS keychain via keytar    | `.env`, code, sidecar |
 
 ## Distribution architecture (shipping to other editors)
 

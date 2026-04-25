@@ -1,6 +1,6 @@
 # Cairn — Product Specification (v1)
 
-> *A cairn is a stack of stones left on a trail by someone who walked it first, marking the way for whoever comes next.*
+> _A cairn is a stack of stones left on a trail by someone who walked it first, marking the way for whoever comes next._
 
 ## What Cairn is
 
@@ -29,6 +29,7 @@ The plugin handles all folder reorganisation internally — no external tool req
 Your `organise.py` ports into the plugin as `ingest.py`. Its existing `is_sony_card()` and `already_organised()` detection logic drives the routing. The file-type buckets (VIDEO_EXTS, PHOTO_EXTS, ASSET_EXTS) extend naturally to Mode C handling.
 
 Other details:
+
 - **Proxy generation**: optional toggle, off by default
 - Creates Resolve bins mirroring your `01_VIDEOS/A_CAM`, `02_PHOTOS`, `03_ASSETS` structure
 - Reads the same Sony XML metadata your script already parses — extended to pull lens, camera, timecode into the clip metadata panel
@@ -122,10 +123,12 @@ You open Resolve like normal, scrub through the markers to find the bites you lo
 
 Two colour dimensions operate at different levels, giving you instant visual meaning without overlap:
 
-**Media pool clip colour** = what *kind* of clip it is
+**Media pool clip colour** = what _kind_ of clip it is
+
 - Blue = A-ROLL, Green = B-ROLL, Yellow = AMBIGUOUS, Purple = PHOTOS, Tan = ASSETS
 
-**Timeline marker colour** (on A-roll clips only) = what *type of story beat* a soundbite is
+**Timeline marker colour** (on A-roll clips only) = what _type of story beat_ a soundbite is
+
 - Green = origin/story, Red = emotional peak, Blue = factual, Yellow = hook
 
 The clip colour is a property of the clip in the media pool; the marker colour applies inside the clip's timeline. They never collide. Scanning the media pool gives you category-at-a-glance; opening an A-roll clip gives you story-structure-at-a-glance.
@@ -141,8 +144,8 @@ The clip colour is a property of the clip in the media pool; the marker colour a
 5. AssemblyAI transcribes the A-roll + the walkthrough clips you confirmed as A-roll. Subtitle tracks show her dialogue, "Speaker 1: Lauren" labelled.
 6. Claude vision tags B-roll. Clips now have metadata like `hands on wheel, medium close-up, warm tungsten, clay-covered fingers, shallow DOF`.
 7. Brief chat opens. You tell Claude: Lauren's a local ceramicist; one 60-90s IG Reel and one 2-3min YouTube cut; warm, intimate tone; focus on origin story and craft passion.
-8. Claude identifies 12 candidate soundbites. Each gets a green marker (story), red marker (emotional peak), or blue marker (factual) at the correct source timecode. Notes read like *"Origin story — she started at 19 after trying pottery at uni. Strong emotional hook, usable as cold open."*
-9. B-roll matching runs. Each soundbite marker's note lists matches: *"Matching B-roll: clip_042 (literal — close-up hands on wheel), clip_081 (thematic — wide studio golden hour)."* B-roll clips get `MATCHES: origin_story, passion_quote` in their metadata.
+8. Claude identifies 12 candidate soundbites. Each gets a green marker (story), red marker (emotional peak), or blue marker (factual) at the correct source timecode. Notes read like _"Origin story — she started at 19 after trying pottery at uni. Strong emotional hook, usable as cold open."_
+9. B-roll matching runs. Each soundbite marker's note lists matches: _"Matching B-roll: clip_042 (literal — close-up hands on wheel), clip_081 (thematic — wide studio golden hour)."_ B-roll clips get `MATCHES: origin_story, passion_quote` in their metadata.
 10. Plugin sidebar shows the story map. You click the "origin story" soundbite → Resolve jumps there. You love it, drag to a new timeline. Sidebar shows the two suggested B-roll matches; you preview, pick one. Repeat.
 
 **Estimated time saved on a project like this: the full logging pass — 2-3 hours — reduced to 20 minutes of supervised review. You still cut the edit yourself.**

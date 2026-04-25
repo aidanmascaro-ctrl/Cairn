@@ -137,15 +137,15 @@ Resolve's exact API names require verification — see Open Questions. Whatever 
 
 Power-user feel — keep it tight:
 
-| Shortcut | Action |
-|---|---|
-| `J / K` | Prev / next soundbite |
-| `Enter` | Jump Resolve playhead to selected bite |
-| `M` | Mark selected bite as used |
-| `R` | Open review panel |
-| `/` | Focus search |
-| `1..9` | Filter by beat-type chip (by position) |
-| `Esc` | Clear filter / close modal |
+| Shortcut | Action                                 |
+| -------- | -------------------------------------- |
+| `J / K`  | Prev / next soundbite                  |
+| `Enter`  | Jump Resolve playhead to selected bite |
+| `M`      | Mark selected bite as used             |
+| `R`      | Open review panel                      |
+| `/`      | Focus search                           |
+| `1..9`   | Filter by beat-type chip (by position) |
+| `Esc`    | Clear filter / close modal             |
 
 ## Open questions
 

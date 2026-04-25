@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Agent = Model + Harness.** The model reasons. The harness is everything else — what the model sees, what it can do, how consistently it performs. This file + specs + plans + sensors are the harness.
 
 ### Guides (feedforward — shape reasoning before it starts)
+
 - `CLAUDE.md` — operational rules; read every session
 - `spec.md` — product truth; read before any feature work
 - `specs/*.md` — per-stage detailed specs
@@ -25,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `AGENT.md` — self-discovered build and run commands
 
 ### Sensors (feedback — inject corrections back into context)
+
 - **TypeScript compiler errors** (`npm run typecheck`) → fix before proceeding, never `any`-cast away
 - **pyrefly / mypy errors** (`pyrefly check`) → fix before proceeding
 - **ESLint / Prettier** (`npm run lint`) → address warnings before marking a task complete
@@ -34,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **LLM-as-judge** → pipe Claude outputs (soundbite selections, B-roll matches) back through a second Claude call to score confidence before showing the user
 
 ### The Loop-Back Rule
+
 Always look for opportunities to feed plugin output back through the model for evaluation. This is the single highest-leverage harness pattern.
 
 - After writing markers → subagent reads timeline, verifies placement
@@ -42,6 +45,7 @@ Always look for opportunities to feed plugin output back through the model for e
 - After generating ffmpeg commands → dry-run validation before executing
 
 ### Meta-Reasoning Rule
+
 Before answering any complex question or writing any significant Claude prompt: identify at least two ways the current approach could be wrong, then address them. Especially important in `src/orchestrator/prompts/` where prompt mistakes compound silently.
 
 ---
@@ -51,7 +55,7 @@ Before answering any complex question or writing any significant Claude prompt: 
 These are hard constraints that take precedence over any task instruction. The user's footage and workflow are at stake.
 
 1. **NEVER modify the user's source media files.** Read-only guarantee. ffprobe, ffmpeg `-c copy`, frame extraction to temp — never re-encode or overwrite source.
-2. **NEVER delete clips from the user's filesystem.** The organise stage *moves* files; it does not delete. Never use `os.remove`, `fs.unlink`, or `shutil.rmtree` on user media paths.
+2. **NEVER delete clips from the user's filesystem.** The organise stage _moves_ files; it does not delete. Never use `os.remove`, `fs.unlink`, or `shutil.rmtree` on user media paths.
 3. **NEVER call the Resolve Scripting API from multiple processes simultaneously.** The API is not thread-safe. Serialise all Resolve calls through a single worker.
 4. **NEVER embed API keys in code.** Keys come from OS keychain (via `keytar`) or user settings UI. Never `.env` committed to git. Never hardcoded.
 5. **NEVER implement placeholder, stub, or "minimal" logic.** Ship full implementations per spec, or flag incomplete work in `fix_plan.md` and skip the feature. Claude's bias toward placeholders is the #1 silent failure mode.
@@ -63,14 +67,16 @@ These are hard constraints that take precedence over any task instruction. The u
 
 ## One Item Per Loop
 
-When working from `IMPLEMENTATION_PLAN.md`, work one task at a time, top-to-bottom. Mark done. Don't parallelise across tasks — parallelise *within* a task via subagents where appropriate. If Ralph goes off-track, narrow back to strictly one item.
+When working from `IMPLEMENTATION_PLAN.md`, work one task at a time, top-to-bottom. Mark done. Don't parallelise across tasks — parallelise _within_ a task via subagents where appropriate. If Ralph goes off-track, narrow back to strictly one item.
 
 ### Subagent Usage
+
 - **Parallel subagents** for: codebase search (`ripgrep`), per-clip metadata extraction, per-clip vision tagging, per-clip sidecar JSON writes
 - **Single subagent** for: Resolve API calls, build, test, git operations, ffmpeg transcoding (CPU/GPU-bound)
 - **Primary context window operates as a scheduler** — dispatch expensive allocation work to subagents rather than filling the main window
 
 ### Don't Assume Not Implemented
+
 Before implementing anything, search the codebase with subagents. Failure mode: Claude greps, misses a case, reimplements, creates drift. "Search before create" is a standing rule.
 
 ---
@@ -78,23 +84,25 @@ Before implementing anything, search the codebase with subagents. Failure mode: 
 ## Data Architecture — Resolve-first, sidecar-backed
 
 ### The Rule in One Sentence
+
 > Every piece of generated metadata lives in two synchronised places: Resolve (for editor workflow) and sidecar JSON (for re-ingest, debugging, and plugin state).
 
 ### What Lives Where
 
-| Data Type | Resolve | Sidecar JSON | Never |
-|---|---|---|---|
-| Clip classification (A/B/Ambiguous) | Keywords field | `<clip>.json` | — |
-| Clip colour | SetClipColor | — (visual only) | — |
-| Transcript | Subtitle track | Full JSON with timestamps | — |
-| B-roll visual tags | Keywords field | Full tag set + confidence | — |
-| B-roll match IDs | Shot field | Full match data | — |
-| B-roll notes | Description field | — | — |
-| Soundbite markers | Timeline markers | Marker audit log | — |
-| Project brief | — | Brief JSON | Resolve fields |
-| API keys | — | OS keychain only | `.env`, code, sidecar |
+| Data Type                           | Resolve           | Sidecar JSON              | Never                 |
+| ----------------------------------- | ----------------- | ------------------------- | --------------------- |
+| Clip classification (A/B/Ambiguous) | Keywords field    | `<clip>.json`             | —                     |
+| Clip colour                         | SetClipColor      | — (visual only)           | —                     |
+| Transcript                          | Subtitle track    | Full JSON with timestamps | —                     |
+| B-roll visual tags                  | Keywords field    | Full tag set + confidence | —                     |
+| B-roll match IDs                    | Shot field        | Full match data           | —                     |
+| B-roll notes                        | Description field | —                         | —                     |
+| Soundbite markers                   | Timeline markers  | Marker audit log          | —                     |
+| Project brief                       | —                 | Brief JSON                | Resolve fields        |
+| API keys                            | —                 | OS keychain only          | `.env`, code, sidecar |
 
 ### Sidecar JSON Location
+
 `<project>/04_EXPORT/.cairn/<clip-id>.json` — hidden folder alongside the organised structure. Re-ingest reads these first; APIs are only called when sidecar is missing or stale.
 
 ---
@@ -193,41 +201,43 @@ cairn/
 
 ## MCP Servers Available in Claude Code Sessions
 
-| MCP | Prefix | What to use it for |
-|---|---|---|
-| **Filesystem** | `mcp__Filesystem__*` | Read/write project files, scaffold directories |
-| **Desktop Commander** | `mcp__Desktop_Commander__*` | Shell access, running tests, git |
-| **context7** | `mcp__context7__*` | Up-to-date docs for Electron, Svelte, Resolve API, AssemblyAI SDK |
-| **GitHub** | `mcp__github__*` | Issues, PRs, releases |
+| MCP                   | Prefix                      | What to use it for                                                |
+| --------------------- | --------------------------- | ----------------------------------------------------------------- |
+| **Filesystem**        | `mcp__Filesystem__*`        | Read/write project files, scaffold directories                    |
+| **Desktop Commander** | `mcp__Desktop_Commander__*` | Shell access, running tests, git                                  |
+| **context7**          | `mcp__context7__*`          | Up-to-date docs for Electron, Svelte, Resolve API, AssemblyAI SDK |
+| **GitHub**            | `mcp__github__*`            | Issues, PRs, releases                                             |
 
 ### Using context7
+
 Critical for this project — the Resolve Scripting API has poorly indexed docs and the JS API is worse. Pull fresh docs before writing any Resolve call. Same for Electron packaging.
 
 ### Using Desktop Commander
+
 Use for running `npm test`, `pytest`, `ruff check`, `pyrefly check`, ffmpeg commands in the assets folder, and git operations. Never for touching user media — only inside the project repo.
 
 ---
 
 ## Skills Available in Claude Code Sessions
 
-| Skill | Trigger | Use for |
-|---|---|---|
-| `frontend-design` | Svelte UI work | Plugin panels, drop zone, brief chat, sidebar cockpit |
-| `mcp-builder` | MCP surfaces | If we later expose plugin functions via MCP to other tools |
-| `skill-creator` | New project skills | Domain skills specific to this plugin (e.g. Resolve marker conventions) |
-| `security-review` | Key handling, auth | Before shipping any release — audit for key exposure |
-| `verification-loop` | Pre-release | Full end-to-end test on the sample project |
-| `simplify` | After large features | Post-Stage review sweeps |
+| Skill               | Trigger              | Use for                                                                 |
+| ------------------- | -------------------- | ----------------------------------------------------------------------- |
+| `frontend-design`   | Svelte UI work       | Plugin panels, drop zone, brief chat, sidebar cockpit                   |
+| `mcp-builder`       | MCP surfaces         | If we later expose plugin functions via MCP to other tools              |
+| `skill-creator`     | New project skills   | Domain skills specific to this plugin (e.g. Resolve marker conventions) |
+| `security-review`   | Key handling, auth   | Before shipping any release — audit for key exposure                    |
+| `verification-loop` | Pre-release          | Full end-to-end test on the sample project                     |
+| `simplify`          | After large features | Post-Stage review sweeps                                                |
 
 ---
 
 ## Environment Variables (never committed)
 
-| Variable | Purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | User-provided, stored via keytar |
-| `ASSEMBLYAI_API_KEY` | User-provided, stored via keytar |
-| `CAIRN_LOG_LEVEL` | dev mode logging (default `info`) |
+| Variable             | Purpose                                         |
+| -------------------- | ----------------------------------------------- |
+| `ANTHROPIC_API_KEY`  | User-provided, stored via keytar                |
+| `ASSEMBLYAI_API_KEY` | User-provided, stored via keytar                |
+| `CAIRN_LOG_LEVEL`    | dev mode logging (default `info`)               |
 | `CAIRN_SIDECAR_ROOT` | Override for testing (`.cairn` folder location) |
 
 Never commit `.env.local`, `.env.development`, or any file with API keys.

@@ -49,8 +49,7 @@
   <header>
     <h1>Cairn</h1>
     <p class="tagline">
-      A stack of stones on a trail. The pre-edit work is done;
-      the creative work is yours.
+      A stack of stones on a trail. The pre-edit work is done; the creative work is yours.
     </p>
   </header>
 
@@ -91,10 +90,14 @@
     <section class="card versions">
       <h2>Runtime</h2>
       <dl>
-        <dt>Plugin ID</dt><dd><code>{ping.pluginId}</code></dd>
-        <dt>Electron</dt><dd>{ping.electron}</dd>
-        <dt>Chromium</dt><dd>{ping.chrome}</dd>
-        <dt>Node</dt><dd>{ping.node}</dd>
+        <dt>Plugin ID</dt>
+        <dd><code>{ping.pluginId}</code></dd>
+        <dt>Electron</dt>
+        <dd>{ping.electron}</dd>
+        <dt>Chromium</dt>
+        <dd>{ping.chrome}</dd>
+        <dt>Node</dt>
+        <dd>{ping.node}</dd>
       </dl>
     </section>
   {/if}

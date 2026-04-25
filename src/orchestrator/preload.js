@@ -6,27 +6,27 @@
 // This file is the trust boundary — extend it by adding explicit functions
 // here and handlers in main.js. Do not expose ipcRenderer directly.
 
-'use strict';
+"use strict";
 
-const { contextBridge, ipcRenderer } = require('electron/renderer');
+const { contextBridge, ipcRenderer } = require("electron/renderer");
 
-contextBridge.exposeInMainWorld('cairn', {
-    /**
-     * Proof-of-life snapshot of Resolve state (project/timeline names).
-     * Safe to call before Resolve is open — returns `{ available: false, ... }`.
-     */
-    getResolveSnapshot: () => ipcRenderer.invoke('cairn:resolve:snapshot'),
+contextBridge.exposeInMainWorld("cairn", {
+  /**
+   * Proof-of-life snapshot of Resolve state (project/timeline names).
+   * Safe to call before Resolve is open — returns `{ available: false, ... }`.
+   */
+  getResolveSnapshot: () => ipcRenderer.invoke("cairn:resolve:snapshot"),
 
-    /**
-     * Lightweight ping — confirms the IPC channel is alive and exposes
-     * Electron/Node/Chrome versions for the Settings "About" panel.
-     */
-    ping: () => ipcRenderer.invoke('cairn:ping'),
+  /**
+   * Lightweight ping — confirms the IPC channel is alive and exposes
+   * Electron/Node/Chrome versions for the Settings "About" panel.
+   */
+  ping: () => ipcRenderer.invoke("cairn:ping"),
 
-    /**
-     * Echo — sends a string to the Python worker and returns it with a
-     * timestamp. Temporary proof-of-life for the Node↔Python bridge.
-     * @param {string} payload
-     */
-    echo: (payload) => ipcRenderer.invoke('cairn:echo', payload),
+  /**
+   * Echo — sends a string to the Python worker and returns it with a
+   * timestamp. Temporary proof-of-life for the Node↔Python bridge.
+   * @param {string} payload
+   */
+  echo: (payload) => ipcRenderer.invoke("cairn:echo", payload),
 });

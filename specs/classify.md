@@ -16,6 +16,7 @@ For every imported video clip, decide whether it's A-roll (primary dialogue), B-
 ## Outputs
 
 **Per clip:**
+
 - **Classification label** written to Resolve `Keywords`: one of `A-ROLL`, `B-ROLL`, `AMBIGUOUS`.
 - **Clip colour** set via `SetClipColor`:
   - `A-ROLL` → Blue
@@ -37,6 +38,7 @@ For every imported video clip, decide whether it's A-roll (primary dialogue), B-
   ```
 
 **Review panel surface:**
+
 - All clips classified `AMBIGUOUS` appear in a plugin panel with a scrubbable preview and two buttons (`Mark A-roll` / `Mark B-roll`). User decisions update both Resolve + sidecar and move the clip into its confirmed category.
 
 ## Algorithm
@@ -74,10 +76,10 @@ speech_ratio = total_speech / len(wav)                 # 0.0 – 1.0
 
 **Classification thresholds** (tunable; start conservative):
 
-| `speech_ratio` | Label |
-|---|---|
-| `≥ 0.60` | `A-ROLL` |
-| `≤ 0.05` | `B-ROLL` |
+| `speech_ratio`        | Label       |
+| --------------------- | ----------- |
+| `≥ 0.60`              | `A-ROLL`    |
+| `≤ 0.05`              | `B-ROLL`    |
 | `0.05 < ratio < 0.60` | `AMBIGUOUS` |
 
 Rationale: the ambiguous middle captures clips with incidental chatter, studio walkthroughs, overheard voices, or clips where the mic picked up the interviewer's prompt but the interviewee hasn't started yet. Better to ask the user than silently mis-tag.
@@ -125,6 +127,6 @@ User confirmation writes `"classification": "<confirmed>"` and `"user_confirmed"
 
 - **Ideal thresholds** — 0.60 / 0.05 are educated guesses. Calibrate against Aidan's sample shoot + two other projects before shipping.
 - **Silero VAD v4 vs v5** — v5 is newer but has occasional false-positives on music. Pin to v4 for now; revisit if misclassifications surface.
-- **Clips with music + dialogue** (e.g. interview with B-roll ambient mix) — VAD will flag as speech. Is that right? Probably yes for v1 (it *does* have dialogue) — user can override via the review panel.
+- **Clips with music + dialogue** (e.g. interview with B-roll ambient mix) — VAD will flag as speech. Is that right? Probably yes for v1 (it _does_ have dialogue) — user can override via the review panel.
 - **Multi-track audio** (e.g. lav on track 1, shotgun on track 2) — current plan: downmix to mono. A smarter v2 could VAD each track separately and flag "dialogue on track 1 only" to inform later audio routing. Out of scope for v1.
 - **Long clips** (>10 min talking heads) — VAD runs in ~1–2 s per file per `spec.md`; verify against a 30-min test clip.

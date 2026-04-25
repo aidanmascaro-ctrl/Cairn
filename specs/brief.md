@@ -49,8 +49,8 @@ After indexing (Stages 1–4) finishes, open a chat panel that extracts a struct
   },
   "notes": "Free-text notes captured during the conversation.",
   "conversation_log": [
-    {"role": "assistant", "content": "..."},
-    {"role": "user", "content": "..."}
+    { "role": "assistant", "content": "..." },
+    { "role": "user", "content": "..." }
   ],
   "finalised": true
 }
@@ -61,6 +61,7 @@ After indexing (Stages 1–4) finishes, open a chat panel that extracts a struct
 ### Conversation flow
 
 One question at a time. Claude leads. Each Claude turn has:
+
 - A short acknowledgement of the prior user message
 - The next question, clearly scoped to one field
 
@@ -90,12 +91,14 @@ Both tool calls return the updated draft so the UI can show live progress ("4 / 
 ### Prompts
 
 All prompts in `src/orchestrator/prompts/`:
+
 - `brief_system.md` — persona, constraints, question order, meta-reasoning block on common failure modes (leading questions, over-filling fields from one vague user answer)
 - `brief_finalise.md` — final extraction pass instructions
 
 ### Edit mode
 
 Any time after finalisation:
+
 - User opens Settings → Brief → sees current JSON in a form UI (not raw JSON — a friendly form).
 - Edits are written to `brief.json` directly.
 - If `soundbites` or `matching` have already run, editing the brief surfaces a "Re-run matching with new brief?" prompt. Does not invalidate transcripts or vision tags — those are brief-independent.
@@ -122,7 +125,7 @@ This helps Claude ground questions ("I notice a couple of B-roll clips look like
 
 ## Open questions
 
-- **When to open the chat** — spec says "after indexing completes". But indexing can take 15+ min on large shoots. Should we open the brief chat *during* indexing (so Claude can work in parallel) and gate only Stages 6–7 on both being done? Leaning: yes, parallel — improves perceived latency.
+- **When to open the chat** — spec says "after indexing completes". But indexing can take 15+ min on large shoots. Should we open the brief chat _during_ indexing (so Claude can work in parallel) and gate only Stages 6–7 on both being done? Leaning: yes, parallel — improves perceived latency.
 - **Voice input** — dictating the brief would feel natural. Out of scope v1; nice v2.
 - **Brief templates** — editors tend to do similar projects (interview shorts, case-study reels). Offer "start from a template" in v2. Not v1.
 - **How strict on required fields?** If a user doesn't want to set `word_boost_terms`, that's fine. Mark that field optional. Required: subject, deliverables, narrative_angle, tone, privacy.

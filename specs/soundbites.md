@@ -15,7 +15,8 @@ For every A-roll clip, read the transcript and the project brief, and identify t
 ## Outputs
 
 **Per clip:**
-- **Timeline markers** placed on the *source* clip (media pool clip marker, not timeline marker — these travel with the clip into any timeline the editor drags it to):
+
+- **Timeline markers** placed on the _source_ clip (media pool clip marker, not timeline marker — these travel with the clip into any timeline the editor drags it to):
   - Marker `frame` = source-frame of soundbite in-point
   - Marker `duration` = soundbite length in frames
   - Marker `color` = one of Resolve's accepted colours, mapped by beat type (below)
@@ -51,24 +52,24 @@ For every A-roll clip, read the transcript and the project brief, and identify t
 
 From `spec.md`:
 
-| Beat type | Colour |
-|---|---|
-| `origin-story` | Green |
-| `emotional-peak` | Red |
-| `factual` | Blue |
-| `hook` | Yellow |
+| Beat type        | Colour |
+| ---------------- | ------ |
+| `origin-story`   | Green  |
+| `emotional-peak` | Red    |
+| `factual`        | Blue   |
+| `hook`           | Yellow |
 
 Additional beat types discoverable from the brief's `desired_soundbite_types` map to other Resolve marker colours. Defaults for new types:
 
-| Beat type | Colour |
-|---|---|
-| `quote` | Cyan |
-| `process-detail` | Purple |
-| `humour` | Pink |
-| `reflection` | Lavender |
-| `technical` | Sky |
-| `tension` | Fuchsia |
-| `resolution` | Mint |
+| Beat type        | Colour   |
+| ---------------- | -------- |
+| `quote`          | Cyan     |
+| `process-detail` | Purple   |
+| `humour`         | Pink     |
+| `reflection`     | Lavender |
+| `technical`      | Sky      |
+| `tension`        | Fuchsia  |
+| `resolution`     | Mint     |
 
 Invalid colour strings are rejected before the Resolve call; fallback to `Lemon` and log.
 
@@ -116,6 +117,7 @@ Address: apply the definitions rigorously, default to omitting on uncertainty.
 **Tool-use call shape:** `propose_soundbites` tool with array-of-objects schema matching the sidecar output above (excluding `judge_score`, set by Stage 6b).
 
 **Selection rules baked into the prompt:**
+
 - Use word-level timestamps to bound the bite to a complete utterance (don't cut mid-word).
 - Prefer starts on a breath / sentence boundary; prefer ends on a natural falling-intonation cue (Claude can't hear this directly, but the transcript punctuation is a reasonable proxy).
 - Target duration: 5–40 s (hard limits). Most bites 8–20 s.

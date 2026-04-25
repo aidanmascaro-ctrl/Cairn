@@ -10,7 +10,7 @@
 //   const result = await bridge.send({ type: "echo", payload: "hello" });
 //   await bridge.stop();
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -53,9 +53,7 @@ export type OutboundMessage = z.infer<typeof OutboundMessageSchema>;
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 
 // Caller-facing type: OutboundMessage without the `id` field (bridge adds it).
-export type OutboundCall =
-  | { type: "echo"; payload: string }
-  | { type: "ping" };
+export type OutboundCall = { type: "echo"; payload: string } | { type: "ping" };
 
 // ── Bridge ───────────────────────────────────────────────────────────────────
 
@@ -66,7 +64,7 @@ type PendingCall = {
 };
 
 export class PythonBridge {
-  private proc: ChildProcess | null = null;
+  private proc: ChildProcessWithoutNullStreams | null = null;
   private pending = new Map<string, PendingCall>();
   private callTimeoutMs: number;
   private pythonPath: string;
@@ -93,21 +91,22 @@ export class PythonBridge {
   async start(): Promise<void> {
     if (this.isRunning) return;
 
-    this.proc = spawn(this.pythonPath, [this.scriptPath], {
+    const proc = spawn(this.pythonPath, [this.scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.proc = proc;
 
-    const rl = createInterface({ input: this.proc.stdout! });
-    rl.on("line", (line) => this.handleLine(line.trim()));
+    const rl = createInterface({ input: proc.stdout });
+    rl.on("line", (line) => {
+      this.handleLine(line.trim());
+    });
 
-    this.proc.stderr!.on("data", (chunk: Buffer) => {
-      // Python stderr goes to Node stderr — visible in Electron DevTools console
+    proc.stderr.on("data", (chunk: Buffer) => {
       process.stderr.write(`[python-bridge] ${chunk.toString()}`);
     });
 
-    this.proc.on("exit", (code) => {
+    proc.on("exit", (code) => {
       this.proc = null;
-      // Reject all pending calls
       for (const [, pending] of this.pending) {
         clearTimeout(pending.timeoutHandle);
         pending.reject(new Error(`Python worker exited with code ${String(code)}`));
@@ -115,17 +114,19 @@ export class PythonBridge {
       this.pending.clear();
     });
 
-    // Wait for the worker to confirm it's ready via a pong
     await this.call({ type: "ping" });
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning || !this.proc) return;
-    this.proc.stdin!.end();
+    const proc = this.proc;
+    if (!this.isRunning || proc === null) return;
+    proc.stdin.end();
     await new Promise<void>((resolve) => {
-      this.proc!.once("exit", () => resolve());
+      proc.once("exit", () => {
+        resolve();
+      });
       setTimeout(() => {
-        this.proc?.kill();
+        proc.kill();
         resolve();
       }, 2_000);
     });
@@ -134,7 +135,10 @@ export class PythonBridge {
 
   /** Send a message and await the response. */
   async call(msg: OutboundCall): Promise<InboundMessage> {
-    if (!this.isRunning) throw new Error("PythonBridge is not running. Call start() first.");
+    const proc = this.proc;
+    if (!this.isRunning || proc === null) {
+      throw new Error("PythonBridge is not running. Call start() first.");
+    }
 
     const id = randomUUID();
     const outbound = OutboundMessageSchema.parse({ ...msg, id });
@@ -142,11 +146,15 @@ export class PythonBridge {
     return new Promise<InboundMessage>((resolve, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Python bridge call timed out after ${this.callTimeoutMs}ms (type=${outbound.type}, id=${id})`));
+        reject(
+          new Error(
+            `Python bridge call timed out after ${String(this.callTimeoutMs)}ms (type=${outbound.type}, id=${id})`,
+          ),
+        );
       }, this.callTimeoutMs);
 
       this.pending.set(id, { resolve, reject, timeoutHandle });
-      this.proc!.stdin!.write(JSON.stringify(outbound) + "\n");
+      proc.stdin.write(JSON.stringify(outbound) + "\n");
     });
   }
 

@@ -3,6 +3,7 @@
 ## Purpose
 
 Take a user-dropped folder and end with:
+
 1. A filesystem laid out according to the template (`01_VIDEOS/A_CAM`, `01_VIDEOS/B_CAM`, `02_PHOTOS`, `03_ASSETS`, `04_EXPORT`)
 2. A Resolve project with bins mirroring that structure
 3. Every clip imported into the correct bin, with extracted Sony XML metadata (lens, camera, timecode) attached
@@ -14,16 +15,19 @@ No AI, no transcription, no classification. This stage proves the plugin can rel
 **Primary:** one filesystem path dropped onto the plugin's drop zone — a folder or a mounted drive.
 
 **Routing triggers** (from `organise.py`):
+
 - **Mode A — Raw Sony card dump**: contains `DCIM/` or `M4ROOT/`. Detected by `is_sony_card()`.
 - **Mode B — Already-organised**: contains `01_VIDEOS/` or `02_PHOTOS/`. Detected by `already_organised()`.
-- **Mode C — Loose or mixed**: random media files, no template. Detected by *absence* of the above + presence of files with extensions in `VIDEO_EXTS ∪ PHOTO_EXTS`.
+- **Mode C — Loose or mixed**: random media files, no template. Detected by _absence_ of the above + presence of files with extensions in `VIDEO_EXTS ∪ PHOTO_EXTS`.
 
 **Secondary signals:**
+
 - Optional `--name` override (passed from the UI drop-zone dialog)
 - Sony `MEDIAPRO.XML` or sibling XML for date + camera metadata
 - User setting: "Generate proxies on import" (off by default)
 
 **Forbidden inputs:**
+
 - Source paths inside `/System/` or Windows system paths — refuse with clear error
 - Drives mounted read-only — detect early, refuse before moving
 - Folders with active Resolve locks (`<project>.drp.lock`) — surface a "Resolve has this project open" error
@@ -31,13 +35,15 @@ No AI, no transcription, no classification. This stage proves the plugin can rel
 ## Outputs
 
 **On disk:**
+
 - Folder renamed to `YYMMDD <shoot name>` if not already date-prefixed
 - Template subfolders created: `01_VIDEOS/A_CAM`, `01_VIDEOS/B_CAM`, `02_PHOTOS`, `03_ASSETS`, `04_EXPORT`
-- Files *moved* (never deleted, never copied + deleted) to the right subfolder
+- Files _moved_ (never deleted, never copied + deleted) to the right subfolder
 - Empty Sony shell folders (`DCIM`, `M4ROOT`, `PRIVATE`, etc.) removed when empty
 - `04_EXPORT/.cairn/` hidden folder created, empty, ready for sidecars
 
 **In Resolve:**
+
 - Project opened (or created) with name matching the shoot folder name
 - Media Pool bin tree:
   - `Cairn/`
@@ -54,6 +60,7 @@ No AI, no transcription, no classification. This stage proves the plugin can rel
 - If the proxy toggle is on: Resolve proxy generation kicked off (Optimised Media at ¼ res, ProRes 422 Proxy preset)
 
 **Sidecars:**
+
 - One `<project>/04_EXPORT/.cairn/<clip-id>.json` per clip, with:
   ```json
   {

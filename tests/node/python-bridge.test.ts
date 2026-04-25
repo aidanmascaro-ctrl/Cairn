@@ -46,7 +46,7 @@ describe("PythonBridge", () => {
   it("concurrent calls all resolve correctly", async () => {
     const payloads = ["alpha", "beta", "gamma", "delta", "epsilon"];
     const responses = await Promise.all(
-      payloads.map((p) => bridge.call({ type: "echo", payload: p }))
+      payloads.map((p) => bridge.call({ type: "echo", payload: p })),
     );
     for (const [i, response] of responses.entries()) {
       expect(response.type).toBe("echo_response");
@@ -60,7 +60,7 @@ describe("PythonBridge", () => {
     // The OutboundMessageSchema discriminated union rejects unknown types at the
     // Node boundary — correct behaviour; nothing unsafe reaches the worker.
     await expect(
-      bridge.call({ type: "unknown_type_xyz" } as unknown as OutboundCall)
+      bridge.call({ type: "unknown_type_xyz" } as unknown as OutboundCall),
     ).rejects.toThrow();
   });
 });

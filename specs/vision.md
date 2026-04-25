@@ -17,6 +17,7 @@ For every clip labelled `B-ROLL` (including user-confirmed ambiguous clips), ext
 ## Outputs
 
 **Per clip:**
+
 - **Five frames** extracted to `04_EXPORT/.cairn/frames/<clip-id>/{01..05}.jpg` (deleted after upload unless `CAIRN_KEEP_FRAMES` env var is set).
 - **Structured tags** written to Resolve `Keywords` as a comma-joined list of the most filterable labels (subjects + shot type + key descriptors):
   - Example: `hands, wheel, clay, warm-light, close-up, shallow-DOF`
@@ -59,6 +60,7 @@ ffmpeg -ss <pct * duration> -i <clip> -frames:v 1 -q:v 3 \
 ```
 
 Edge cases:
+
 - **Clips < 2 s**: take 3 frames instead (first, middle, last) — 5 frames from a 1-s clip over-samples.
 - **End frame at exactly duration**: some containers drop the last frame; if ffmpeg fails, step back 0.1 s.
 - **Very long clips (> 10 min)**: still 5 frames, but note in sidecar `"sampling_note": "long-clip-sparse"` — Stage 7 matching should weight this lower for literal matches since the visual content likely varies across the clip.

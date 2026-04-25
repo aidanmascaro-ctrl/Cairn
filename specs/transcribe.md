@@ -17,6 +17,7 @@ For every clip labelled `A-ROLL` (including user-confirmed ambiguous clips), pro
 ## Outputs
 
 **Per clip:**
+
 - **Subtitle track** attached in Resolve:
   - Created via `MediaPoolItem.AddSubTitle(file_path)` using a generated `.srt`
   - Speakers labelled (e.g., "Speaker 1: Lauren", "Speaker 2: Interviewer") — user can edit names in the UI; edits propagate to all of that speaker's captions.
@@ -65,6 +66,7 @@ else:
 - Parse response into the sidecar shape above.
 
 **Minimal request shape (pseudocode):**
+
 ```python
 import assemblyai as aai
 aai.settings.api_key = key
@@ -78,6 +80,7 @@ transcript = transcriber.transcribe(audio_path, config=config)
 ```
 
 **Word-level output mapping:**
+
 - AssemblyAI `words[]` → our `words[]` directly; field renames as noted above.
 - AssemblyAI `utterances[]` (from speaker labels) → our `utterances[]`.
 - Speaker IDs are AssemblyAI's `A`, `B`, `C`… We preserve them and let the user label in the UI.
@@ -137,7 +140,7 @@ If the user changes provider (cloud ↔ local), re-transcribe is a conscious dec
 ## Open questions
 
 - **Per-project vs per-clip opt-in for cloud transcription** — current plan is per-project. Is that the right granularity? Probably yes; a single shoot either is or isn't under NDA.
-- **Word boost from brief** — if the brief hasn't been filled yet, transcription runs without it. Do we offer to re-transcribe after the brief? Decision: no — spec says brief opens *after* indexing. Word boost is nice-to-have, not required.
+- **Word boost from brief** — if the brief hasn't been filled yet, transcription runs without it. Do we offer to re-transcribe after the brief? Decision: no — spec says brief opens _after_ indexing. Word boost is nice-to-have, not required.
 - **Multiple languages** — v1 assumes English. Detect non-English via AssemblyAI's language detection and surface to user? Current plan: yes, detect and display; actual multilingual transcription is out of scope for v1.
 - **Subtitle styling in Resolve** — `AddSubTitle` imports as a track; Resolve controls styling. Do we need to also write a burned-in preview option? v2.
 - **Live progress** — AssemblyAI returns partial transcripts. Do we stream them to the UI? Nice UX but adds complexity; v1 shows a spinner and final result.
