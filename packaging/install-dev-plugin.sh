@@ -22,9 +22,11 @@
 set -euo pipefail
 
 PLUGIN_ID="com.aidanmascaro.cairn"
+# Resolve scans the system-level path on this machine (confirmed by Snap Captions install).
+# Folder name uses display name "Cairn", matching the Snap Captions convention.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="${HOME}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/${PLUGIN_ID}"
-SYSTEM_TARGET="/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/${PLUGIN_ID}"
+TARGET="/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/Cairn"
+SYSTEM_TARGET="$TARGET"
 WORKFLOW_NODE="/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Workflow Integrations/Examples/SamplePromisePlugin/WorkflowIntegration.node"
 
 DO_BUILD=1
@@ -56,12 +58,11 @@ if [[ $DO_BUILD -eq 1 ]]; then
     npm run build:ui
 fi
 
-# The user-level path is preferred (no sudo needed); fall back to system path only if the user-level dir is locked off.
-if [[ -w "$(dirname "$TARGET")" ]] || [[ ! -d "$(dirname "$TARGET")" ]]; then
+INSTALL_PATH="$TARGET"
+if [[ ! -w "$(dirname "$TARGET")" ]]; then
+    echo "→ System plugin dir not writable — trying with sudo."
     INSTALL_PATH="$TARGET"
-else
-    INSTALL_PATH="$SYSTEM_TARGET"
-    echo "→ User-level plugin dir not writable; using system path (may require sudo)."
+    USE_SUDO=1
 fi
 
 echo "→ Target: $INSTALL_PATH"

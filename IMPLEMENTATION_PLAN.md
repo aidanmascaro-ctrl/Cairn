@@ -49,10 +49,10 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] Create `package.js` (Electron app entry) — implemented as `package.json` + `src/orchestrator/main.js` (standard Electron entry); manifest `FilePath` points to the main.js
 - [x] Create `src/ui/index.html` with a blank Svelte shell
 - [x] Install the sandboxed Electron model per Blackmagic's 2024+ recommendation — `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, bridged via `contextBridge.exposeInMainWorld('cairn', …)` in `src/orchestrator/preload.js`; uses `WorkflowIntegration.InitializePromise` (SamplePromisePlugin reference, not the CompatibleSamplePlugin legacy one)
-- [ ] Verify: plugin folder placed at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/com.aidanmascaro.cairn/` → appears under `Workspace > Workflow Integrations > Cairn`  **(awaiting user — requires Resolve running; run `npm run install-plugin` then restart Resolve)**
-- [ ] Proof-of-life: plugin window opens, calls `WorkflowIntegration.Initialize()`, reads current Resolve project name, renders it on screen  **(awaiting user)**
-- [ ] Commit: `feat: plugin skeleton loads in Resolve` — deferred until verification passes
-- [ ] Tag: `v0.0.1` — deferred until verification passes
+- [x] Verify: plugin appears under `Workspace > Workflow Integrations > Cairn` — confirmed. Note: Resolve scans system-level path only; install at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/Cairn/` (display-name folder, not plugin ID)
+- [x] Proof-of-life: plugin window opens and renders — confirmed by user
+- [x] Commit: `feat: plugin skeleton loads in Resolve`
+- [x] Tag: `v0.0.1`
 
 ### Task 4: Node ↔ Python bridge
 - [ ] Create `src/orchestrator/python-bridge.ts` — spawns Python subprocess, JSON-per-line stdin/stdout protocol, message types typed with Zod schemas
