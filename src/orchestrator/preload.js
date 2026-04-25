@@ -151,6 +151,29 @@ contextBridge.exposeInMainWorld("cairn", {
     },
   },
 
+  matching: {
+    /**
+     * Get soundbite + B-roll counts + estimated cost for matching.
+     * @param {{ path: string }} payload
+     */
+    estimate: (payload) => ipcRenderer.invoke("cairn:matching:estimate", payload),
+    /**
+     * Run B-roll matching for all soundbites in the shoot folder.
+     * @param {{ path: string, dry_run?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:matching", payload),
+    /**
+     * Subscribe to matching progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:matching:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:matching:progress", listener);
+    },
+  },
+
   soundbites: {
     /**
      * Get A-ROLL clip count + estimated Claude cost for soundbite selection.

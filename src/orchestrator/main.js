@@ -855,6 +855,68 @@ function registerIpc() {
       }
     );
   });
+
+  ipcMain.handle("cairn:matching:estimate", async (_event, payload) => {
+    return callPython(
+      { type: "matching_estimate", payload: { path: String(payload.path) } },
+      { timeoutMs: 60_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:matching", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:matching:progress", obj);
+    };
+
+    const keys = readStoredKeys();
+    const enrichedPayload = {
+      ...payload,
+      api_key: keys["ANTHROPIC_API_KEY"] ?? "",
+    };
+
+    let result;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "matching", payload: enrichedPayload },
+          {
+            timeoutMs: 1_800_000,
+            onProgress: (ev) => sendProgress(ev),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(() => rej(new Error("Matching timed out (30 min)")), 1_800_000),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "matching_progress",
+        event: "matching_error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return {
+        total_soundbites: 0,
+        processed: 0,
+        errors: 0,
+        total_matches: 0,
+        rejected: 0,
+        broll_clips_matched: 0,
+        uncovered_soundbites: [],
+      };
+    }
+
+    return (
+      result ?? {
+        total_soundbites: 0,
+        processed: 0,
+        errors: 0,
+        total_matches: 0,
+        rejected: 0,
+        broll_clips_matched: 0,
+        uncovered_soundbites: [],
+      }
+    );
+  });
 }
 
 function createMainWindow() {

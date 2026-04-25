@@ -8,6 +8,7 @@
   import VisionPanel from "./VisionPanel.svelte";
   import BriefPanel from "./BriefPanel.svelte";
   import SoundbitesPanel from "./SoundbitesPanel.svelte";
+  import MatchingPanel from "./MatchingPanel.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -110,6 +111,8 @@
   <BriefPanel {ingestFolder} />
 
   <SoundbitesPanel {ingestFolder} />
+
+  <MatchingPanel {ingestFolder} />
 
   <Settings />
 

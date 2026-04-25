@@ -285,6 +285,53 @@ export interface BriefApi {
   reset(payload: { path: string }): Promise<{ ok: boolean }>;
 }
 
+// ── Matching types ─────────────────────────────────────────────────────────────
+
+export interface MatchingEstimateResult {
+  type: "matching_estimate_result";
+  soundbite_count: number;
+  broll_clip_count: number;
+  estimated_cost_usd: number;
+}
+
+export interface MatchingProgressEvent {
+  event:
+    | "matching_started"
+    | "soundbite_matched"
+    | "soundbite_error"
+    | "matching_complete"
+    | "matching_error";
+  soundbite_id?: string;
+  clip_file?: string;
+  accepted?: number;
+  rejected?: number;
+  reason?: string;
+  total_soundbites?: number;
+  broll_clips?: number;
+  // matching_complete summary
+  processed?: number;
+  errors?: number;
+  total_matches?: number;
+  broll_clips_matched?: number;
+  uncovered_soundbites?: string[];
+}
+
+export interface MatchingResult {
+  total_soundbites: number;
+  processed: number;
+  errors: number;
+  total_matches: number;
+  rejected: number;
+  broll_clips_matched: number;
+  uncovered_soundbites: string[];
+}
+
+export interface MatchingApi {
+  estimate(payload: { path: string }): Promise<MatchingEstimateResult>;
+  run(payload: { path: string; dry_run?: boolean }): Promise<MatchingResult>;
+  onProgress(callback: (event: MatchingProgressEvent) => void): () => void;
+}
+
 // ── Soundbites types ───────────────────────────────────────────────────────────
 
 export interface SoundbiteEntry {
@@ -426,6 +473,7 @@ export interface CairnBridge {
   classify: ClassifyApi;
   transcribe: TranscribeApi;
   vision: VisionApi;
+  matching: MatchingApi;
   soundbites: SoundbitesApi;
   brief: BriefApi;
   keys: KeysApi;

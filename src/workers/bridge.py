@@ -26,6 +26,7 @@ from typing import Any
 import brief as brief_worker
 import classify as classify_worker
 import ingest as ingest_worker
+import matching as matching_worker
 import resolve_api
 import sidecar
 import soundbites as soundbites_worker
@@ -226,6 +227,25 @@ def handle_soundbites_estimate(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_matching_estimate(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return soundbite count + B-roll count + estimated Claude cost for matching.
+    payload: { path: str }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    library = matching_worker.build_broll_library(path)
+    aroll_clips = matching_worker.scan_aroll_for_matching(path)
+    estimate = matching_worker.estimate_matching(aroll_clips, library)
+
+    return {
+        "id": msg["id"],
+        "type": "matching_estimate_result",
+        **estimate,
+    }
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
@@ -234,6 +254,7 @@ HANDLERS: dict[str, Any] = {
     "update_speaker_labels": handle_update_speaker_labels,
     "vision_estimate": handle_vision_estimate,
     "soundbites_estimate": handle_soundbites_estimate,
+    "matching_estimate": handle_matching_estimate,
     "brief_get": handle_brief_get,
     "brief_message": handle_brief_message,
     "brief_save": handle_brief_save,
@@ -558,12 +579,114 @@ def handle_soundbites(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield {"id": msg_id, "type": "soundbites_progress", "resolve_ok": resolve_ok, **event}
 
 
+def handle_matching(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """
+    Match B-roll clips to soundbites for a shoot folder.
+
+    Expected payload keys:
+      path      -- absolute path to organised shoot folder (required)
+      api_key   -- Anthropic API key (required)
+      dry_run   -- bool, default False (skip Resolve metadata writes when True)
+
+    Yields matching_progress events per soundbite, then matching_complete.
+    """
+    payload = msg.get("payload", {})
+    msg_id: str = msg["id"]
+
+    path: str = payload["path"]
+    api_key: str = payload.get("api_key", "")
+    dry_run: bool = bool(payload.get("dry_run", False))
+
+    for event in matching_worker.process_all(path, api_key):
+        if event.get("event") == "matching_complete":
+            if not dry_run:
+                # Write B-roll Shot + Description fields to Resolve
+                # Re-read sidecars to get final aggregated match data
+                from sidecar import sidecar_root
+
+                root = sidecar_root(path)
+                if root.exists():
+                    for scar_file in root.glob("*.json"):
+                        if scar_file.name == "brief.json":
+                            continue
+                        try:
+                            import json as _json
+
+                            sc = _json.loads(scar_file.read_text())
+                        except Exception:
+                            continue
+                        if sc.get("classification") != "B-ROLL":
+                            continue
+                        matches = sc.get("matches", [])
+                        if not matches:
+                            continue
+                        clip_file = sc.get("source_path", "")
+                        if not clip_file:
+                            continue
+                        shot_str = matching_worker._compute_shot_string(matches)
+                        desc_str = matching_worker._compute_description_string(matches)
+                        try:
+                            resolve_api.set_shot_field(clip_file, shot_str)
+                            resolve_api.set_description_field(clip_file, desc_str)
+                        except Exception as exc:
+                            print(
+                                f"[bridge.py] Resolve B-roll metadata write failed for {clip_file}: {exc}",
+                                file=sys.stderr,
+                            )
+
+                # Re-read A-roll sidecars that now have matching stage
+                if root.exists():
+                    for scar_file in root.glob("*.json"):
+                        if scar_file.name == "brief.json":
+                            continue
+                        try:
+                            import json as _json
+
+                            sc = _json.loads(scar_file.read_text())
+                        except Exception:
+                            continue
+                        if sc.get("classification") != "A-ROLL":
+                            continue
+                        if "matching" not in sc.get("stages_complete", []):
+                            continue
+                        clip_file = sc.get("source_path", "")
+                        if not clip_file:
+                            continue
+                        for bite in sc.get("soundbites", []):
+                            bite_matches = bite.get("matches", [])
+                            if not bite_matches:
+                                continue
+                            frame_id = bite.get("in_frame")
+                            if frame_id is None:
+                                continue
+                            matches_line = matching_worker._matches_line_for_marker(bite_matches)
+                            try:
+                                resolve_api.update_marker_note(
+                                    clip_file, int(frame_id), matches_line
+                                )
+                            except Exception as exc:
+                                print(
+                                    f"[bridge.py] Marker note update failed for {clip_file} frame {frame_id}: {exc}",
+                                    file=sys.stderr,
+                                )
+
+            yield {"id": msg_id, "type": "matching_complete", **event}
+            return
+
+        if event.get("event") == "error":
+            yield {"id": msg_id, "type": "error", "message": event.get("reason", "Unknown error")}
+            return
+
+        yield {"id": msg_id, "type": "matching_progress", **event}
+
+
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
     "classify": handle_classify,
     "transcribe": handle_transcribe,
     "vision": handle_vision,
     "soundbites": handle_soundbites,
+    "matching": handle_matching,
 }
 
 

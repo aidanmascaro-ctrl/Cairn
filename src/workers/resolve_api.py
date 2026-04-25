@@ -527,6 +527,99 @@ def add_clip_marker(
         _release_lock()
 
 
+# ── Matching helpers ──────────────────────────────────────────────────────────
+
+
+def set_shot_field(clip_path: str, value: str) -> bool:
+    """
+    Write the Shot metadata field for a B-roll clip.
+    Returns True on success, False if Resolve is unavailable or clip not found.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        return bool(clip.SetMetadata("Shot", value))
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()
+
+
+def set_description_field(clip_path: str, value: str) -> bool:
+    """
+    Write the Description metadata field for a B-roll clip.
+    Returns True on success, False if Resolve is unavailable or clip not found.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        return bool(clip.SetMetadata("Description", value))
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()
+
+
+def update_marker_note(clip_path: str, frame_id: int, matches_line: str) -> bool:
+    """
+    Append (or replace) the MATCHES: line on an existing Cairn soundbite marker.
+    Preserves all other marker properties. Safe to call on re-runs (replaces
+    any existing MATCHES: line rather than appending a duplicate).
+    Returns True on success.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        markers: dict = clip.GetMarkers() or {}
+        marker = markers.get(frame_id)
+        if not marker:
+            return False
+
+        old_note: str = marker.get("note", "")
+        # Remove any existing MATCHES: line (idempotent re-runs)
+        cleaned_lines = [ln for ln in old_note.split("\n") if not ln.startswith("MATCHES:")]
+        new_note = "\n".join(cleaned_lines).rstrip() + f"\n{matches_line}"
+
+        clip.DeleteMarkerAtFrame(frame_id)
+        result = clip.AddMarker(
+            frame_id,
+            marker.get("color", "Lemon"),
+            marker.get("name", ""),
+            new_note,
+            marker.get("duration", 1),
+            marker.get("customData", ""),
+        )
+        return bool(result)
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()
+
+
 def add_subtitle_track(clip_path: str, srt_path: str) -> bool:
     """
     Attach an SRT subtitle file to the Resolve clip at clip_path.
