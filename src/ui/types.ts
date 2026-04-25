@@ -49,9 +49,56 @@ export interface KeysApi {
   validate(params: KeyValidateParams): Promise<KeyValidateResult>;
 }
 
+export interface IngestPayload {
+  path: string;
+  name?: string;
+  dry_run?: boolean;
+  write_sidecar?: boolean;
+  resolve?: boolean;
+}
+
+export interface IngestMetadata {
+  shoot_date: string;
+  camera: string;
+  lens: string;
+  timecode_start: string;
+}
+
+export interface IngestClipPaths {
+  a_cam: string[];
+  photos: string[];
+  assets?: string[];
+}
+
+export interface IngestProgressEvent {
+  event: string;
+  src?: string;
+  dst?: string;
+  count?: number;
+  reason?: string;
+  dry_run?: boolean;
+}
+
+export interface IngestResult {
+  folder: string;
+  files_moved: number;
+  shells_removed: number;
+  metadata: IngestMetadata;
+  clip_paths: IngestClipPaths;
+  resolve_counts: Record<string, number>;
+  dry_run: boolean;
+  timestamp_iso: string;
+}
+
+export interface IngestApi {
+  run(payload: IngestPayload): Promise<IngestResult>;
+  onProgress(callback: (event: IngestProgressEvent) => void): () => void;
+}
+
 export interface CairnBridge {
   getResolveSnapshot(): Promise<ResolveSnapshot>;
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;
+  ingest: IngestApi;
   keys: KeysApi;
 }

@@ -30,6 +30,24 @@ contextBridge.exposeInMainWorld("cairn", {
    */
   echo: (payload) => ipcRenderer.invoke("cairn:echo", payload),
 
+  ingest: {
+    /**
+     * Run the ingest pipeline for one shoot folder.
+     * @param {{ path: string, name?: string, dry_run?: boolean, write_sidecar?: boolean, resolve?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:ingest", payload),
+    /**
+     * Subscribe to ingest progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:ingest:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:ingest:progress", listener);
+    },
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),

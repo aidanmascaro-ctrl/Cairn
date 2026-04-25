@@ -75,6 +75,11 @@ function ensurePythonWorker() {
     }
     const pending = pythonPending.get(msg.id);
     if (!pending) return;
+    // Progress events: call callback, keep promise alive
+    if (msg.type === "ingest_progress") {
+      pending.onProgress?.(msg);
+      return;
+    }
     clearTimeout(pending.timer);
     pythonPending.delete(msg.id);
     pending.resolve(msg);
@@ -94,16 +99,21 @@ function ensurePythonWorker() {
   });
 }
 
-/** @param {object} msg @returns {Promise<object>} */
-function callPython(msg) {
+/**
+ * @param {object} msg
+ * @param {{ onProgress?: (e: object) => void, timeoutMs?: number }} [opts]
+ * @returns {Promise<object>}
+ */
+function callPython(msg, opts = {}) {
   ensurePythonWorker();
   const id = randomUUID();
+  const timeoutMs = opts.timeoutMs ?? 10_000;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pythonPending.delete(id);
       reject(new Error("Python bridge call timed out"));
-    }, 10_000);
-    pythonPending.set(id, { resolve, reject, timer });
+    }, timeoutMs);
+    pythonPending.set(id, { resolve, reject, timer, onProgress: opts.onProgress });
     pythonWorker.stdin.write(JSON.stringify({ ...msg, id }) + "\n");
   });
 }
@@ -328,6 +338,21 @@ function registerIpc() {
 
   ipcMain.handle("cairn:keys:validate", async (_event, { type, key }) => {
     return validateKey(String(type), String(key));
+  });
+
+  ipcMain.handle("cairn:ingest", async (event, payload) => {
+    return callPython(
+      { type: "ingest", payload },
+      {
+        timeoutMs: 5 * 60 * 1_000, // 5 min — ingest can take time on large cards
+        onProgress: (progressEvent) => {
+          // Push progress events to the renderer without resolving the IPC call
+          if (!event.sender.isDestroyed()) {
+            event.sender.send("cairn:ingest:progress", progressEvent);
+          }
+        },
+      },
+    );
   });
 }
 

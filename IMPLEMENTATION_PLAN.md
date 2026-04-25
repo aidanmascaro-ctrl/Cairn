@@ -105,9 +105,85 @@ Session 2 begins with: "Implement Stage 1 (ingest) per `specs/ingest.md`" — no
 
 ---
 
+## Session 2: Stage 1 — Ingest
+
+### Task 1: `src/workers/ingest.py`
+
+- [x] Port `organise.py` verbatim (VIDEO_EXTS, PHOTO_EXTS, ASSET_EXTS, SONY_SHELLS, TEMPLATE_DIRS, SKIP_NAMES)
+- [x] Mode detection: `is_sony_card()`, `already_organised()`, fall-through Mode C
+- [x] Extended XML metadata extraction: camera, lens, timecode_start, shoot_date (beyond read_sony_date)
+- [x] Progress events: emit `{type:progress,event:file_moved,data:{...}}` to stdout per file
+- [x] Dry-run mode: `--dry-run` flag skips moves and writes, returns plan only
+- [x] Pre-flight: verify path exists, writable, not system path, not read-only mount
+- [x] Sidecar write: calls `sidecar.write_clip()` for every clip before Resolve import
+- [x] Returns structured JSON result: renamed folder, files moved, metadata map, clip list
+
+### Task 2: `src/workers/sidecar.py`
+
+- [x] `write_clip(sidecar_root, clip_id, record)` — writes `<root>/<clip-id>.json` (schema_version 1)
+- [x] `read_clip(sidecar_root, clip_id)` — reads and returns dict, None if missing
+- [x] `clip_id(absolute_path)` = `sha256(str(path))[:16]`
+- [x] Creates `04_EXPORT/.cairn/` if absent; never overwrites without merging stages_complete
+
+### Task 3: `src/workers/resolve_api.py`
+
+- [x] `get_resolve()` — imports DaVinciResolveScript, returns Resolve handle; graceful ImportError
+- [x] `find_or_create_bin(folder, name)` — idempotent; checks existing subfolders first
+- [x] `import_clips(media_pool, bin_folder, paths)` — calls `ImportMedia`, returns clip list
+- [x] `set_clip_metadata(clip, meta_dict)` — calls `SetMetadata` for each key
+- [x] Single-process lock: raises if called concurrently from multiple threads
+- [x] Full bin tree creation: Cairn / 01_VIDEOS / A_CAM, B_CAM / 02_PHOTOS / 03_ASSETS
+
+### Task 4: Extend bridge protocol for streaming progress
+
+- [x] Add `progress` inbound message type to `python-bridge.ts` (InboundMessageSchema)
+- [x] Add `stream(msg, onProgress)` method to `PythonBridge` — resolves on final message, calls callback for progress events
+- [x] `bridge.py`: support streaming handlers that yield multiple messages per request ID
+
+### Task 5: Wire `ingest` through bridge
+
+- [x] Add `ingest` outbound call type to `python-bridge.ts`
+- [x] Add `ingest_complete` inbound response type
+- [x] `bridge.py`: add `handle_ingest` streaming handler
+- [x] `main.js`: add `cairn:ingest` IPC handler using `bridge.stream()`
+- [x] `preload.js`: expose `ingest(payload, onProgress)`
+- [x] `types.ts`: add `IngestPayload`, `IngestResult`, `ProgressEvent`
+
+### Task 6: Drop zone UI
+
+- [x] `src/ui/DropZone.svelte` — drag-and-drop zone + folder picker button
+- [x] Progress display: file count, current file, spinner → ✓ done
+- [x] Wire to `cairn.ingest()` IPC call
+- [x] Add to `App.svelte` (above Settings)
+
+### Task 7: pytest suite
+
+- [x] `tests/python/test_ingest.py` — mode detection, file collection, rename logic, dry-run, metadata extraction, empty-shell cleanup (poisoned dir test), idempotency
+- [x] All tests use `tmp_path` fixture, no filesystem side-effects outside tmp
+- [x] `ruff check` and `pyrefly check` green on all new Python files
+
+### Task 8: Sensors green + commit
+
+- [x] `npm run typecheck`, `npm run lint`, `npm run test` green
+- [x] `python3 -m ruff check src/workers/` and `python3 -m pyrefly check src/workers/` green
+- [x] `python3 -m pytest tests/python/` green
+- [x] Commit: `feat: Stage 1 ingest — organise, Resolve import, sidecar`
+- [x] Tag: `v0.1.0`
+
+---
+
+## Session 2 Success Criteria
+
+1. Drop a Sony card dump onto the plugin — folder renamed, template created, clips moved
+2. Resolve opens with Cairn bin tree and imported clips with metadata
+3. Sidecar JSON files present at `04_EXPORT/.cairn/<clip-id>.json` before Resolve import
+4. All sensors green on `main`
+
+---
+
 ## Carry-Forward / Backlog
 
-- Stage 1 implementation (ingest — port of organise.py, Resolve bin creation) — Session 2
+- Stage 1 implementation (ingest — port of organise.py, Resolve bin creation) — Session 2 ✓ (this session)
 - Stage 2 (classify — Silero VAD integration) — Session 3
 - Stage 3 (transcribe — AssemblyAI client + Whisper fallback) — Session 4
 - Stage 4 (vision — frame extraction + Claude vision tagging) — Session 5
