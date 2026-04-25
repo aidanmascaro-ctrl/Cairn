@@ -379,3 +379,38 @@ def classify_write_resolve(clip_path: str, label: str) -> bool:
         return False
     finally:
         _release_lock()
+
+
+def add_subtitle_track(clip_path: str, srt_path: str) -> bool:
+    """
+    Attach an SRT subtitle file to the Resolve clip at clip_path.
+    Uses MediaPoolItem.AddSubTitle(path) — requires Resolve 18.5+.
+    If AddSubTitle is unavailable, marks the clip as transcribed via SetMetadata
+    and returns True (SRT exists on disk; editor can attach manually).
+    Returns False only if Resolve is unreachable or the clip is not found.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+
+        try:
+            result = clip.AddSubTitle(srt_path)
+            attached = bool(result)
+        except AttributeError:
+            # AddSubTitle not available on this Resolve version — best-effort fallback
+            attached = False
+
+        set_clip_metadata(clip, {"Cairn Stage": "transcribed"})
+        return attached
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()

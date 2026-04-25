@@ -83,6 +83,34 @@ contextBridge.exposeInMainWorld("cairn", {
     confirm: (payload) => ipcRenderer.invoke("cairn:classify:confirm", payload),
   },
 
+  transcribe: {
+    /**
+     * Get clip count + estimated audio minutes for cost preview.
+     * @param {{ path: string }} payload
+     */
+    estimate: (payload) => ipcRenderer.invoke("cairn:transcribe:estimate", payload),
+    /**
+     * Run transcription pipeline on all A-ROLL clips in the shoot folder.
+     * @param {{ path: string, cloud_allowed?: boolean, dry_run?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:transcribe", payload),
+    /**
+     * Subscribe to transcribe progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:transcribe:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:transcribe:progress", listener);
+    },
+    /**
+     * Save user-assigned speaker names to all transcribed clip sidecars.
+     * @param {{ shoot_folder: string, speaker_labels: Record<string, string> }} payload
+     */
+    labelSpeakers: (payload) => ipcRenderer.invoke("cairn:transcribe:label-speakers", payload),
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),

@@ -593,6 +593,55 @@ function registerIpc() {
     return result ?? { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
   });
 
+  ipcMain.handle("cairn:transcribe:estimate", async (_event, payload) => {
+    return callPython(
+      { type: "transcribe_estimate", payload: { path: String(payload.path) } },
+      { timeoutMs: 60_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:transcribe:label-speakers", async (_event, payload) => {
+    return callPython({ type: "update_speaker_labels", payload }, { timeoutMs: 30_000 });
+  });
+
+  ipcMain.handle("cairn:transcribe", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:transcribe:progress", obj);
+    };
+
+    const keys = readStoredKeys();
+    const enrichedPayload = {
+      ...payload,
+      api_key: keys["ASSEMBLYAI_API_KEY"] ?? "",
+    };
+
+    let result;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "transcribe", payload: enrichedPayload },
+          {
+            // Allow up to 30 min for large batches
+            timeoutMs: 1_800_000,
+            onProgress: (ev) => sendProgress(ev),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(() => rej(new Error("Transcribe timed out (30 min)")), 1_800_000),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "transcribe_progress",
+        event: "transcribe_error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return { total: 0, transcribed: 0, skipped: 0, errors: 0 };
+    }
+
+    return result ?? { total: 0, transcribed: 0, skipped: 0, errors: 0 };
+  });
+
   ipcMain.handle("cairn:ingest", async (event, payload) => {
     // Python handles file organisation; Resolve import is done here via the JS
     // WorkflowIntegration API (Python Scripting API hangs from a plugin subprocess).

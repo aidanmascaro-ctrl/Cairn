@@ -153,6 +153,66 @@ export interface ClassifyApi {
   confirm(payload: ClassifyConfirmPayload): Promise<ClassifyConfirmResult>;
 }
 
+export interface TranscribeEstimateResult {
+  type: "transcribe_estimate_result";
+  clip_count: number;
+  estimated_minutes: number;
+  estimated_cost_usd: number;
+}
+
+export interface TranscribePayload {
+  path: string;
+  cloud_allowed?: boolean;
+  dry_run?: boolean;
+}
+
+export interface TranscribeProgressEvent {
+  event:
+    | "transcribe_started"
+    | "clip_transcribed"
+    | "clip_skipped"
+    | "clip_error"
+    | "transcribe_complete";
+  file?: string;
+  provider?: string;
+  utterance_count?: number;
+  word_count?: number;
+  srt_path?: string;
+  speaker_count?: number;
+  reason?: string;
+  resolve_ok?: boolean | null;
+  total_clips?: number;
+  // transcribe_complete summary fields
+  total?: number;
+  transcribed?: number;
+  skipped?: number;
+  errors?: number;
+}
+
+export interface TranscribeResult {
+  total: number;
+  transcribed: number;
+  skipped: number;
+  errors: number;
+}
+
+export interface SpeakerLabelPayload {
+  shoot_folder: string;
+  speaker_labels: Record<string, string>;
+}
+
+export interface SpeakerLabelResult {
+  type: "speaker_labels_updated";
+  updated_count: number;
+}
+
+export interface TranscribeApi {
+  estimate(payload: { path: string }): Promise<TranscribeEstimateResult>;
+  run(payload: TranscribePayload): Promise<TranscribeResult>;
+  onProgress(callback: (event: TranscribeProgressEvent) => void): () => void;
+  labelSpeakers(payload: SpeakerLabelPayload): Promise<SpeakerLabelResult>;
+}
+
 export interface CairnBridge {
   openFolder(): Promise<string | null>;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
@@ -160,5 +220,6 @@ export interface CairnBridge {
   echo(payload: string): Promise<EchoResult>;
   ingest: IngestApi;
   classify: ClassifyApi;
+  transcribe: TranscribeApi;
   keys: KeysApi;
 }

@@ -27,6 +27,7 @@ import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
 import sidecar
+import transcribe as transcribe_worker
 
 # ── Single-response handlers ──────────────────────────────────────────────────
 
@@ -86,10 +87,50 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_transcribe_estimate(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return clip count + estimated audio minutes for the shoot folder.
+    Used by the UI to show cost estimate before starting transcription.
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    clips = transcribe_worker.scan_aroll_clips(path)
+    minutes = transcribe_worker.estimate_minutes(clips)
+
+    return {
+        "id": msg["id"],
+        "type": "transcribe_estimate_result",
+        "clip_count": len(clips),
+        "estimated_minutes": minutes,
+        "estimated_cost_usd": round(minutes * transcribe_worker.ASSEMBLYAI_COST_PER_MIN_USD, 4),
+    }
+
+
+def handle_update_speaker_labels(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Persist user-assigned speaker names into all transcribed clip sidecars.
+    payload: { shoot_folder: str, speaker_labels: {id: name, ...} }
+    """
+    payload = msg.get("payload", {})
+    shoot_folder: str = payload["shoot_folder"]
+    speaker_labels: dict[str, str] = payload.get("speaker_labels", {})
+
+    updated = transcribe_worker.update_speaker_labels(shoot_folder, speaker_labels)
+
+    return {
+        "id": msg["id"],
+        "type": "speaker_labels_updated",
+        "updated_count": updated,
+    }
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
     "classify_confirm": handle_classify_confirm,
+    "transcribe_estimate": handle_transcribe_estimate,
+    "update_speaker_labels": handle_update_speaker_labels,
 }
 
 
@@ -259,9 +300,57 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield {"id": msg_id, "type": "classify_progress", "resolve_ok": resolve_ok, **event}
 
 
+def handle_transcribe(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """
+    Transcribe all A-ROLL clips in a shoot folder.
+
+    Expected payload keys:
+      path          -- absolute path to the organised shoot folder (required)
+      api_key       -- AssemblyAI API key (required when cloud_allowed=True)
+      cloud_allowed -- bool, default True (False → faster-whisper local)
+      word_boost    -- list[str], optional project-specific vocabulary hints
+      dry_run       -- bool, default False (skip Resolve subtitle attach when True)
+
+    Yields transcribe_progress events per clip, then transcribe_complete.
+    """
+    payload = msg.get("payload", {})
+    msg_id: str = msg["id"]
+
+    path: str = payload["path"]
+    api_key: str = payload.get("api_key", "")
+    cloud_allowed: bool = bool(payload.get("cloud_allowed", True))
+    word_boost: list[str] | None = payload.get("word_boost")
+    dry_run: bool = bool(payload.get("dry_run", False))
+
+    clip_paths = transcribe_worker.scan_aroll_clips(path)
+
+    for event in transcribe_worker.transcribe_all(
+        clip_paths, path, api_key, cloud_allowed, word_boost
+    ):
+        if event.get("event") == "transcribe_complete":
+            yield {"id": msg_id, "type": "transcribe_complete", **event}
+            return
+
+        resolve_ok: bool | None = None
+        if not dry_run and event.get("event") == "clip_transcribed":
+            srt_path = event.get("srt_path", "")
+            if srt_path:
+                try:
+                    resolve_ok = resolve_api.add_subtitle_track(event["file"], srt_path)
+                except Exception as exc:
+                    resolve_ok = False
+                    print(
+                        f"[bridge.py] subtitle attach failed for {event['file']}: {exc}",
+                        file=sys.stderr,
+                    )
+
+        yield {"id": msg_id, "type": "transcribe_progress", "resolve_ok": resolve_ok, **event}
+
+
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
     "classify": handle_classify,
+    "transcribe": handle_transcribe,
 }
 
 
