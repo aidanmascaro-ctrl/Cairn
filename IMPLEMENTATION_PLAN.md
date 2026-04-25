@@ -31,17 +31,17 @@ At session end: archive completed items, carry forward anything unfinished, rege
 
 ### Task 2: Decompose spec.md into /specs/*.md
 The single `spec.md` is the product overview. Each pipeline stage needs its own detailed spec so Claude Code only loads what it needs per task. Each spec file must include: Purpose, Inputs, Outputs, Algorithm/Prompt, Sensors/Validations, Open Questions.
-- [ ] `specs/overview.md` — distilled from spec.md: visual system, distribution architecture, out-of-scope, architecture diagram
-- [ ] `specs/ingest.md` — three input modes, port of `organise.py`, Resolve bin creation, XML metadata extraction, proxy toggle
-- [ ] `specs/classify.md` — Silero VAD thresholds, clip colour mapping, ambiguous review panel
-- [ ] `specs/transcribe.md` — AssemblyAI request/response schemas, Whisper fallback, subtitle track format, JSON sidecar schema
-- [ ] `specs/vision.md` — frame extraction timing strategy (first, 25%, 50%, 75%, end), Claude vision prompt, structured tag output schema
-- [ ] `specs/brief.md` — conversation flow, question order, brief JSON schema, editable-brief mechanics
-- [ ] `specs/soundbites.md` — selection prompt with meta-reasoning block, marker colour mapping (green/red/blue/yellow), marker note format, in/out timecode precision
-- [ ] `specs/matching.md` — literal vs thematic distinction, prompt design, Keywords/Shot/Description write strategy, confidence thresholds
-- [ ] `specs/sidebar.md` — UI wireframe, story-map component, click-to-jump Resolve API call, B-roll preview panel
-- [ ] Cross-check: every stage in spec.md has a matching specs/*.md file
-- [ ] Commit: `docs: decompose spec.md into per-stage specs`
+- [x] `specs/overview.md` — distilled from spec.md: visual system, distribution architecture, out-of-scope, architecture diagram
+- [x] `specs/ingest.md` — three input modes, port of `organise.py`, Resolve bin creation, XML metadata extraction, proxy toggle
+- [x] `specs/classify.md` — Silero VAD thresholds, clip colour mapping, ambiguous review panel
+- [x] `specs/transcribe.md` — AssemblyAI request/response schemas, Whisper fallback, subtitle track format, JSON sidecar schema
+- [x] `specs/vision.md` — frame extraction timing strategy (first, 25%, 50%, 75%, end), Claude vision prompt, structured tag output schema
+- [x] `specs/brief.md` — conversation flow, question order, brief JSON schema, editable-brief mechanics
+- [x] `specs/soundbites.md` — selection prompt with meta-reasoning block, marker colour mapping (green/red/blue/yellow), marker note format, in/out timecode precision
+- [x] `specs/matching.md` — literal vs thematic distinction, prompt design, Keywords/Shot/Description write strategy, confidence thresholds
+- [x] `specs/sidebar.md` — UI wireframe, story-map component, click-to-jump Resolve API call, B-roll preview panel
+- [x] Cross-check: every stage in spec.md has a matching specs/*.md file
+- [x] Commit: `docs: decompose spec.md into per-stage specs`
 
 ### Task 3: Electron plugin skeleton
 - [ ] Clone `VilleOlof/Toolbox` to `/tmp/` as reference (do not vendor — study only)
