@@ -44,15 +44,15 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 - [x] Commit: `docs: decompose spec.md into per-stage specs`
 
 ### Task 3: Electron plugin skeleton
-- [ ] Clone `VilleOlof/Toolbox` to `/tmp/` as reference (do not vendor — study only)
-- [ ] Create `manifest.xml` with plugin ID `com.aidanmascaro.cairn`, display name `Cairn`, version `0.0.1`
-- [ ] Create `package.js` (Electron app entry)
-- [ ] Create `src/ui/index.html` with a blank Svelte shell
-- [ ] Install the sandboxed Electron model per Blackmagic's 2024+ recommendation
-- [ ] Verify: plugin folder placed at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/com.aidanmascaro.cairn/` → appears under `Workspace > Workflow Integrations > Cairn`
-- [ ] Proof-of-life: plugin window opens, calls `WorkflowIntegration.Initialize()`, reads current Resolve project name, renders it on screen
-- [ ] Commit: `feat: plugin skeleton loads in Resolve`
-- [ ] Tag: `v0.0.1`
+- [x] Clone `VilleOlof/Toolbox` to `/tmp/` as reference (do not vendor — study only)
+- [x] Create `manifest.xml` with plugin ID `com.aidanmascaro.cairn`, display name `Cairn`, version `0.0.1`
+- [x] Create `package.js` (Electron app entry) — implemented as `package.json` + `src/orchestrator/main.js` (standard Electron entry); manifest `FilePath` points to the main.js
+- [x] Create `src/ui/index.html` with a blank Svelte shell
+- [x] Install the sandboxed Electron model per Blackmagic's 2024+ recommendation — `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, bridged via `contextBridge.exposeInMainWorld('cairn', …)` in `src/orchestrator/preload.js`; uses `WorkflowIntegration.InitializePromise` (SamplePromisePlugin reference, not the CompatibleSamplePlugin legacy one)
+- [ ] Verify: plugin folder placed at `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Workflow Integration Plugins/com.aidanmascaro.cairn/` → appears under `Workspace > Workflow Integrations > Cairn`  **(awaiting user — requires Resolve running; run `npm run install-plugin` then restart Resolve)**
+- [ ] Proof-of-life: plugin window opens, calls `WorkflowIntegration.Initialize()`, reads current Resolve project name, renders it on screen  **(awaiting user)**
+- [ ] Commit: `feat: plugin skeleton loads in Resolve` — deferred until verification passes
+- [ ] Tag: `v0.0.1` — deferred until verification passes
 
 ### Task 4: Node ↔ Python bridge
 - [ ] Create `src/orchestrator/python-bridge.ts` — spawns Python subprocess, JSON-per-line stdin/stdout protocol, message types typed with Zod schemas

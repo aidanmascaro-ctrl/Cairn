@@ -1,0 +1,30 @@
+{
+  "name": "cairn",
+  "version": "0.0.1",
+  "description": "DaVinci Resolve Workflow Integration Plugin — identifies, doesn't assemble.",
+  "type": "commonjs",
+  "main": "src/orchestrator/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build:ui": "vite build",
+    "build": "npm run build:ui",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint configured in Task 5'",
+    "test": "echo 'tests configured in Task 5'",
+    "install-plugin": "bash packaging/install-dev-plugin.sh"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.1",
+    "@tsconfig/svelte": "^5.0.4",
+    "@types/node": "^20.12.12",
+    "electron": "^30.0.6",
+    "svelte": "^4.2.17",
+    "svelte-check": "^3.7.1",
+    "tslib": "^2.6.2",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  },
+  "dependencies": {}
+}
