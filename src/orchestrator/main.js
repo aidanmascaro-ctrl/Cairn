@@ -16,6 +16,8 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createInterface } = require("node:readline");
 const { randomUUID } = require("node:crypto");
+const https = require("node:https");
+const keytar = require("keytar");
 
 // ── Inline Python bridge (lightweight — for IPC handlers only) ───────────────
 // The full typed PythonBridge class lives in src/orchestrator/python-bridge.ts
@@ -177,6 +179,67 @@ async function getResolveSnapshot() {
   }
 }
 
+// ── Keychain ─────────────────────────────────────────────────────────────────
+
+const KEYCHAIN_SERVICE = "com.aidanmascaro.cairn";
+
+/**
+ * Fire a HEAD/GET request and return the HTTP status code.
+ * @param {https.RequestOptions & { timeout?: number }} options
+ * @returns {Promise<{statusCode: number, error?: string}>}
+ */
+function httpsGet(options) {
+  return new Promise((resolve) => {
+    const req = https.request({ method: "GET", ...options }, (res) => {
+      resolve({ statusCode: res.statusCode ?? 0 });
+      res.resume();
+    });
+    req.on("error", (err) => resolve({ statusCode: 0, error: err.message }));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ statusCode: 0, error: "request timed out" });
+    });
+    req.end();
+  });
+}
+
+/**
+ * @param {"anthropic"|"assemblyai"} type
+ * @param {string} key
+ * @returns {Promise<{valid: boolean, error?: string}>}
+ */
+async function validateKey(type, key) {
+  if (!key) return { valid: false, error: "No key provided" };
+
+  if (type === "anthropic") {
+    const { statusCode, error } = await httpsGet({
+      hostname: "api.anthropic.com",
+      path: "/v1/models",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      timeout: 8_000,
+    });
+    if (error) return { valid: false, error };
+    if (statusCode === 200) return { valid: true };
+    if (statusCode === 401) return { valid: false, error: "Invalid API key" };
+    return { valid: false, error: `Unexpected status ${statusCode}` };
+  }
+
+  if (type === "assemblyai") {
+    const { statusCode, error } = await httpsGet({
+      hostname: "api.assemblyai.com",
+      path: "/v2/account",
+      headers: { Authorization: key },
+      timeout: 8_000,
+    });
+    if (error) return { valid: false, error };
+    if (statusCode === 200) return { valid: true };
+    if (statusCode === 401) return { valid: false, error: "Invalid API key" };
+    return { valid: false, error: `Unexpected status ${statusCode}` };
+  }
+
+  return { valid: false, error: "Unknown key type" };
+}
+
 function registerIpc() {
   ipcMain.handle("cairn:resolve:snapshot", async () => getResolveSnapshot());
   ipcMain.handle("cairn:ping", async () => ({
@@ -188,6 +251,30 @@ function registerIpc() {
   }));
   ipcMain.handle("cairn:echo", async (_event, payload) => {
     return callPython({ type: "echo", payload: String(payload) });
+  });
+
+  ipcMain.handle("cairn:keys:get", async () => {
+    const [anthropic, assemblyai] = await Promise.all([
+      keytar.getPassword(KEYCHAIN_SERVICE, "ANTHROPIC_API_KEY"),
+      keytar.getPassword(KEYCHAIN_SERVICE, "ASSEMBLYAI_API_KEY"),
+    ]);
+    return { anthropic: anthropic ?? "", assemblyai: assemblyai ?? "" };
+  });
+
+  ipcMain.handle("cairn:keys:set", async (_event, payload) => {
+    const tasks = [];
+    if (typeof payload.anthropic === "string" && payload.anthropic) {
+      tasks.push(keytar.setPassword(KEYCHAIN_SERVICE, "ANTHROPIC_API_KEY", payload.anthropic));
+    }
+    if (typeof payload.assemblyai === "string" && payload.assemblyai) {
+      tasks.push(keytar.setPassword(KEYCHAIN_SERVICE, "ASSEMBLYAI_API_KEY", payload.assemblyai));
+    }
+    await Promise.all(tasks);
+    return { ok: true };
+  });
+
+  ipcMain.handle("cairn:keys:validate", async (_event, { type, key }) => {
+    return validateKey(String(type), String(key));
   });
 }
 

@@ -29,4 +29,19 @@ contextBridge.exposeInMainWorld("cairn", {
    * @param {string} payload
    */
   echo: (payload) => ipcRenderer.invoke("cairn:echo", payload),
+
+  keys: {
+    /** Retrieve stored API keys from the OS keychain. */
+    get: () => ipcRenderer.invoke("cairn:keys:get"),
+    /**
+     * Persist API keys to the OS keychain.
+     * @param {{ anthropic?: string, assemblyai?: string }} payload
+     */
+    set: (payload) => ipcRenderer.invoke("cairn:keys:set", payload),
+    /**
+     * Validate a key against its API. Returns { valid, error? }.
+     * @param {{ type: "anthropic"|"assemblyai", key: string }} params
+     */
+    validate: (params) => ipcRenderer.invoke("cairn:keys:validate", params),
+  },
 });

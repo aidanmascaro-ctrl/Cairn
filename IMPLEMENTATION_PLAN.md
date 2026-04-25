@@ -81,12 +81,12 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 
 ### Task 6: Settings and keychain
 
-- [ ] Create minimal Settings panel in UI (Svelte component)
-- [ ] Two fields: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY` (both password-masked)
-- [ ] Wire to `keytar` — write on save, read on plugin start
-- [ ] Validate keys on save: test call to each API, show ✅ or ❌ next to field
-- [ ] Settings persist across plugin restarts
-- [ ] Commit: `feat: settings panel with keychain storage`
+- [x] Create minimal Settings panel in UI (Svelte component)
+- [x] Two fields: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY` (both password-masked)
+- [x] Wire to `keytar` — write on save, read on plugin start
+- [x] Validate keys on save: test call to each API, show ✅ or ❌ next to field
+- [x] Settings persist across plugin restarts
+- [x] Commit: `feat: settings panel with keychain storage`
 
 ---
 

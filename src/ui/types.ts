@@ -23,8 +23,35 @@ export interface EchoResult {
   timestamp_iso: string;
 }
 
+export interface StoredKeys {
+  anthropic: string;
+  assemblyai: string;
+}
+
+export interface SetKeysPayload {
+  anthropic?: string;
+  assemblyai?: string;
+}
+
+export interface KeyValidateParams {
+  type: "anthropic" | "assemblyai";
+  key: string;
+}
+
+export interface KeyValidateResult {
+  valid: boolean;
+  error?: string;
+}
+
+export interface KeysApi {
+  get(): Promise<StoredKeys>;
+  set(payload: SetKeysPayload): Promise<{ ok: true }>;
+  validate(params: KeyValidateParams): Promise<KeyValidateResult>;
+}
+
 export interface CairnBridge {
   getResolveSnapshot(): Promise<ResolveSnapshot>;
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;
+  keys: KeysApi;
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { CairnBridge, ResolveSnapshot, PingResult } from "./types";
+  import Settings from "./Settings.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -85,6 +86,8 @@
       <p class="echo-result">{echoResult}</p>
     {/if}
   </section>
+
+  <Settings />
 
   {#if ping}
     <section class="card versions">
