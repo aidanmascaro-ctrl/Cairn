@@ -70,6 +70,7 @@ echo "→ Target: $INSTALL_PATH"
 mkdir -p "$(dirname "$INSTALL_PATH")"
 rm -rf "$INSTALL_PATH"
 mkdir -p "$INSTALL_PATH/src/orchestrator"
+mkdir -p "$INSTALL_PATH/src/workers"
 
 link_or_copy() {
     local src="$1"
@@ -88,6 +89,12 @@ cp "$PROJECT_ROOT/package.json" "$INSTALL_PATH/package.json"
 # Electron main + preload
 link_or_copy "$PROJECT_ROOT/src/orchestrator/main.js" "$INSTALL_PATH/src/orchestrator/main.js"
 link_or_copy "$PROJECT_ROOT/src/orchestrator/preload.js" "$INSTALL_PATH/src/orchestrator/preload.js"
+
+# Python workers (bridge.py, ingest.py, resolve_import.py, sidecar.py, resolve_api.py)
+# Symlinked so source edits to .py files are live without reinstalling.
+for f in "$PROJECT_ROOT/src/workers"/*.py; do
+    [[ -f "$f" ]] && link_or_copy "$f" "$INSTALL_PATH/src/workers/$(basename "$f")"
+done
 
 # Built UI
 if [[ -d "$PROJECT_ROOT/dist" ]]; then

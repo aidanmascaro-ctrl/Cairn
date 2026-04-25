@@ -66,6 +66,7 @@ export interface IngestMetadata {
 
 export interface IngestClipPaths {
   a_cam: string[];
+  c_cam: string[];
   photos: string[];
   assets?: string[];
 }
@@ -77,6 +78,8 @@ export interface IngestProgressEvent {
   count?: number;
   reason?: string;
   dry_run?: boolean;
+  // resolve_flat_import fields
+  total?: number;
 }
 
 export interface IngestResult {
@@ -96,6 +99,7 @@ export interface IngestApi {
 }
 
 export interface CairnBridge {
+  openFolder(): Promise<string | null>;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;

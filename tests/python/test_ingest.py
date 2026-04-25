@@ -203,10 +203,79 @@ def test_move_files_empty_list_yields_nothing(tmp_path: Path) -> None:
     assert events == []
 
 
+# ── is_dji_clip ───────────────────────────────────────────────────────────────
+
+
+def test_is_dji_clip_true() -> None:
+    assert ingest.is_dji_clip("DJI_0001.MP4") is True
+    assert ingest.is_dji_clip("dji_0001.mov") is True
+
+
+def test_is_dji_clip_false() -> None:
+    assert ingest.is_dji_clip("C0001.MXF") is False
+    assert ingest.is_dji_clip("IMG_0001.ARW") is False
+
+
+def test_collect_files_dji_to_dji_bucket(tmp_path: Path) -> None:
+    (tmp_path / "DJI_0001.MP4").write_bytes(b"x")
+    (tmp_path / "DJI_0002.MOV").write_bytes(b"x")
+    buckets = ingest.collect_files(tmp_path)
+    assert len(buckets["dji"]) == 2
+    assert len(buckets["videos"]) == 0
+
+
+def test_collect_files_photomator_no_ext_to_photos_bucket(tmp_path: Path) -> None:
+    """Extension-less Photomator edit files must land in the photos bucket."""
+    (tmp_path / "DSC00816").write_bytes(b"x")  # no extension
+    buckets = ingest.collect_files(tmp_path)
+    assert any(p.name == "DSC00816" for p in buckets["photos"])
+    assert not any(p.name == "DSC00816" for p in buckets["assets"])
+
+
+def test_collect_files_xmp_to_photos_bucket(tmp_path: Path) -> None:
+    (tmp_path / "IMG_0001.ARW").write_bytes(b"x")
+    (tmp_path / "IMG_0001.xmp").write_bytes(b"x")
+    buckets = ingest.collect_files(tmp_path)
+    assert any(p.name == "IMG_0001.xmp" for p in buckets["photos"])
+
+
+def test_run_dji_clips_go_to_c_cam(tmp_path: Path) -> None:
+    folder = dated_folder(tmp_path)
+    (folder / "DJI_0001.MP4").write_bytes(b"x")
+    (folder / "DJI_0002.MOV").write_bytes(b"x")
+
+    events = list(ingest.run(str(folder), dry_run=False))
+    complete = next(e for e in events if e.get("event") == "complete")
+    assert len(complete["clip_paths"]["c_cam"]) == 2
+    assert len(complete["clip_paths"]["a_cam"]) == 0
+    assert (folder / "01_VIDEOS" / "C_CAM" / "DJI_0001.MP4").exists()
+    assert (folder / "01_VIDEOS" / "C_CAM" / "DJI_0002.MOV").exists()
+
+
+def test_run_non_dji_clips_not_in_c_cam(tmp_path: Path) -> None:
+    folder = dated_folder(tmp_path)
+    (folder / "C0001.MXF").write_bytes(b"x")
+
+    events = list(ingest.run(str(folder), dry_run=False))
+    complete = next(e for e in events if e.get("event") == "complete")
+    assert len(complete["clip_paths"]["a_cam"]) == 1
+    assert len(complete["clip_paths"]["c_cam"]) == 0
+
+
+def test_run_xmp_companion_moves_with_photos(tmp_path: Path) -> None:
+    folder = dated_folder(tmp_path)
+    (folder / "IMG_0001.ARW").write_bytes(b"x")
+    (folder / "IMG_0001.xmp").write_bytes(b"x")
+
+    list(ingest.run(str(folder), dry_run=False))
+    assert (folder / "02_PHOTOS" / "IMG_0001.ARW").exists()
+    assert (folder / "02_PHOTOS" / "IMG_0001.xmp").exists()
+
+
 # ── remove_empty_shells ───────────────────────────────────────────────────────
 
 
-def test_remove_empty_shells_removes_known_dirs(tmp_path: Path) -> None:
+def test_remove_empty_shells_removes_empty_dirs(tmp_path: Path) -> None:
     (tmp_path / "DCIM").mkdir()
     (tmp_path / "M4ROOT").mkdir()
     count = ingest.remove_empty_shells(tmp_path, dry_run=False)
@@ -223,7 +292,7 @@ def test_remove_empty_shells_dry_run_counts_without_deleting(tmp_path: Path) -> 
 
 
 def test_remove_empty_shells_poisoned_dir_is_skipped(tmp_path: Path) -> None:
-    """Shell dir containing a file must not be removed."""
+    """Shell dir containing a real file must not be removed."""
     shell = tmp_path / "PRIVATE"
     shell.mkdir()
     (shell / "leftover.txt").write_text("user file")
@@ -232,10 +301,40 @@ def test_remove_empty_shells_poisoned_dir_is_skipped(tmp_path: Path) -> None:
     assert shell.exists()
 
 
-def test_remove_empty_shells_case_insensitive(tmp_path: Path) -> None:
-    (tmp_path / "dcim").mkdir()
+def test_remove_empty_shells_ds_store_not_a_blocker(tmp_path: Path) -> None:
+    """A directory containing only .DS_Store should still be removed."""
+    shell = tmp_path / "DCIM"
+    shell.mkdir()
+    (shell / ".DS_Store").write_bytes(b"\x00")
     count = ingest.remove_empty_shells(tmp_path, dry_run=False)
     assert count == 1
+    assert not shell.exists()
+
+
+def test_remove_empty_shells_nested_empty_dirs_removed(tmp_path: Path) -> None:
+    """Parent is cleaned after its empty child is removed (bottom-up)."""
+    dcim = tmp_path / "DCIM"
+    inner = dcim / "100MSDCF"
+    inner.mkdir(parents=True)
+    count = ingest.remove_empty_shells(tmp_path, dry_run=False)
+    assert count == 2
+    assert not dcim.exists()
+
+
+def test_remove_empty_shells_non_sony_user_folder_removed_when_empty(tmp_path: Path) -> None:
+    """Any empty directory (e.g. drone/ after DJI files moved) is cleaned up."""
+    (tmp_path / "drone").mkdir()
+    count = ingest.remove_empty_shells(tmp_path, dry_run=False)
+    assert count == 1
+
+
+def test_remove_empty_shells_template_dirs_never_touched(tmp_path: Path) -> None:
+    """Template directories we created must never be removed even if empty."""
+    for rel in ingest.TEMPLATE_DIRS:
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+    count = ingest.remove_empty_shells(tmp_path, dry_run=False)
+    assert count == 0
+    assert (tmp_path / "01_VIDEOS").exists()
 
 
 # ── preflight ─────────────────────────────────────────────────────────────────
@@ -320,6 +419,67 @@ def test_run_clip_paths_populated_for_video(tmp_path: Path) -> None:
     events = list(ingest.run(str(folder), dry_run=False))
     complete = next(e for e in events if e.get("event") == "complete")
     assert len(complete["clip_paths"]["a_cam"]) == 1
+
+
+def test_run_reclassifies_xmp_sidecars_from_assets_to_photos(tmp_path: Path) -> None:
+    """XMP files previously moved to 03_ASSETS must be relocated to 02_PHOTOS on re-ingest."""
+    folder = dated_folder(tmp_path)
+    for rel in ingest.TEMPLATE_DIRS:
+        (folder / rel).mkdir(parents=True, exist_ok=True)
+    # Simulate old ingest putting XMP in 03_ASSETS
+    (folder / "03_ASSETS" / "IMG_0001.xmp").write_bytes(b"x")
+    (folder / "03_ASSETS" / "IMG_0002.XMP").write_bytes(b"x")
+    (folder / "03_ASSETS" / "something.lut").write_bytes(b"x")  # should stay
+
+    list(ingest.run(str(folder), dry_run=False))
+    assert (folder / "02_PHOTOS" / "IMG_0001.xmp").exists()
+    assert (folder / "02_PHOTOS" / "IMG_0002.XMP").exists()
+    assert (folder / "03_ASSETS" / "something.lut").exists()  # non-XMP unchanged
+
+
+def test_run_reclassifies_photomator_edits_from_assets_to_photos(tmp_path: Path) -> None:
+    """Extension-less Photomator edit files in 03_ASSETS must move to 02_PHOTOS."""
+    folder = dated_folder(tmp_path)
+    for rel in ingest.TEMPLATE_DIRS:
+        (folder / rel).mkdir(parents=True, exist_ok=True)
+    # Simulate old ingest dumping Photomator files into 03_ASSETS
+    (folder / "03_ASSETS" / "DSC00816").write_bytes(b"x")
+    (folder / "03_ASSETS" / "DSC00818").write_bytes(b"x")
+    (folder / "03_ASSETS" / "some.lut").write_bytes(b"x")  # should stay
+
+    list(ingest.run(str(folder), dry_run=False))
+    assert (folder / "02_PHOTOS" / "DSC00816").exists()
+    assert (folder / "02_PHOTOS" / "DSC00818").exists()
+    assert (folder / "03_ASSETS" / "some.lut").exists()
+
+
+def test_run_photomator_edit_moves_with_photos_on_fresh_ingest(tmp_path: Path) -> None:
+    """On a fresh ingest, extension-less Photomator edits move alongside their RAW."""
+    folder = dated_folder(tmp_path)
+    (folder / "DSC00816.ARW").write_bytes(b"raw")
+    (folder / "DSC00816").write_bytes(b"edit")  # Photomator, no extension
+
+    list(ingest.run(str(folder), dry_run=False))
+    assert (folder / "02_PHOTOS" / "DSC00816.ARW").exists()
+    assert (folder / "02_PHOTOS" / "DSC00816").exists()
+
+
+def test_run_reclassifies_dji_clips_already_in_a_cam(tmp_path: Path) -> None:
+    """DJI files previously moved to A_CAM must be relocated to C_CAM on re-ingest."""
+    folder = dated_folder(tmp_path)
+    for rel in ingest.TEMPLATE_DIRS:
+        (folder / rel).mkdir(parents=True, exist_ok=True)
+    # Simulate old ingest putting DJI files in A_CAM
+    (folder / "01_VIDEOS" / "A_CAM" / "DJI_0001.MP4").write_bytes(b"x")
+    (folder / "01_VIDEOS" / "A_CAM" / "DJI_0002.MOV").write_bytes(b"x")
+    (folder / "01_VIDEOS" / "A_CAM" / "C0001.MXF").write_bytes(b"x")  # should stay
+
+    events = list(ingest.run(str(folder), dry_run=False))
+    complete = next(e for e in events if e.get("event") == "complete")
+    assert len(complete["clip_paths"]["c_cam"]) == 2
+    assert (folder / "01_VIDEOS" / "C_CAM" / "DJI_0001.MP4").exists()
+    assert (folder / "01_VIDEOS" / "C_CAM" / "DJI_0002.MOV").exists()
+    assert (folder / "01_VIDEOS" / "A_CAM" / "C0001.MXF").exists()  # non-DJI unchanged
 
 
 def test_run_idempotent_on_already_organised_folder(tmp_path: Path) -> None:

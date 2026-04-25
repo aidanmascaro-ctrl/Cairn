@@ -100,16 +100,18 @@ def get_resolve() -> Any:
     return resolve
 
 
-def find_or_create_bin(parent_folder: Any, name: str) -> Any:
+def find_or_create_bin(media_pool: Any, parent_folder: Any, name: str) -> Any:
     """
     Idempotent: returns the existing sub-folder named `name`, or creates it.
     Must be called with the Resolve lock held (caller's responsibility) or
     wrapped in a single-threaded context.
+
+    Note: AddSubFolder lives on MediaPool, not MediaPoolFolder.
     """
     for sub in parent_folder.GetSubFolderList():
         if sub.GetName() == name:
             return sub
-    created = parent_folder.AddSubFolder(name)
+    created = media_pool.AddSubFolder(parent_folder, name)
     if created is None:
         raise RuntimeError(f"Resolve refused to create bin '{name}'")
     return created
@@ -118,31 +120,45 @@ def find_or_create_bin(parent_folder: Any, name: str) -> Any:
 def build_bin_tree(media_pool: Any) -> dict[str, Any]:
     """
     Create or find the full Cairn bin tree. Returns a dict of named bins:
-      { "root", "cairn", "videos", "a_cam", "b_cam", "photos", "assets" }
+      { "root", "cairn", "videos", "a_cam", "b_cam", "c_cam",
+        "photos", "assets", "thumbnails" }
     """
     root = media_pool.GetRootFolder()
-    cairn = find_or_create_bin(root, "Cairn")
-    videos = find_or_create_bin(cairn, "01_VIDEOS")
-    a_cam = find_or_create_bin(videos, "A_CAM")
-    b_cam = find_or_create_bin(videos, "B_CAM")
-    photos = find_or_create_bin(cairn, "02_PHOTOS")
-    assets = find_or_create_bin(cairn, "03_ASSETS")
+    cairn = find_or_create_bin(media_pool, root, "Cairn")
+    videos = find_or_create_bin(media_pool, cairn, "01_VIDEOS")
+    a_cam = find_or_create_bin(media_pool, videos, "A_CAM")
+    b_cam = find_or_create_bin(media_pool, videos, "B_CAM")
+    c_cam = find_or_create_bin(media_pool, videos, "C_CAM")
+    photos = find_or_create_bin(media_pool, cairn, "02_PHOTOS")
+    assets = find_or_create_bin(media_pool, cairn, "03_ASSETS")
+    thumbnails = find_or_create_bin(media_pool, assets, "Thumbnails")
     return {
         "root": root,
         "cairn": cairn,
         "videos": videos,
         "a_cam": a_cam,
         "b_cam": b_cam,
+        "c_cam": c_cam,
         "photos": photos,
         "assets": assets,
+        "thumbnails": thumbnails,
     }
 
 
-def import_clips(media_pool: Any, bin_folder: Any, paths: list[str]) -> list[Any]:
+def import_clips(
+    media_pool: Any,
+    bin_folder: Any,
+    paths: list[str],
+    *,
+    stills: bool = False,
+) -> list[Any]:
     """
     Import media files into `bin_folder`. Returns the list of MediaPoolItem
     objects created. Skips paths that are already imported (detected by path
     match against existing items).
+
+    stills=True passes ClipInfo dicts with explicit single-frame ranges so
+    Resolve doesn't auto-group sequential filenames into an image sequence.
     """
     if not paths:
         return []
@@ -157,8 +173,25 @@ def import_clips(media_pool: Any, bin_folder: Any, paths: list[str]) -> list[Any
     if not new_paths:
         return []
 
-    clips = media_pool.ImportMedia(new_paths)
-    return clips if clips is not None else []
+    if not stills:
+        clips = media_pool.ImportMedia(new_paths)
+        return clips if clips is not None else []
+
+    # stills=True: RAW formats batch fine (never sequence-detected); JPEG must be
+    # imported one at a time — sequential filenames trigger sequence auto-detection.
+    _jpeg = {".jpg", ".jpeg"}
+    raw_p = [p for p in new_paths if Path(p).suffix.lower() not in _jpeg]
+    jpg_p = [p for p in new_paths if Path(p).suffix.lower() in _jpeg]
+    collected: list[Any] = []
+    if raw_p:
+        result = media_pool.ImportMedia(raw_p)
+        if result:
+            collected.extend(result)
+    for path in jpg_p:
+        result = media_pool.ImportMedia([path])
+        if result:
+            collected.extend(result)
+    return collected
 
 
 def set_clip_metadata(clip: Any, metadata: dict[str, str]) -> bool:
@@ -173,6 +206,17 @@ def set_clip_metadata(clip: Any, metadata: dict[str, str]) -> bool:
     return ok
 
 
+_VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
+_PHOTO_EXTS = {".arw", ".jpg", ".jpeg", ".dng", ".cr2", ".cr3", ".nef", ".raf"}
+
+
+def _scan_dir(directory: Path, exts: set[str]) -> list[str]:
+    """Return absolute paths of all files in `directory` matching `exts`."""
+    if not directory.is_dir():
+        return []
+    return [str(f) for f in directory.iterdir() if f.is_file() and f.suffix.lower() in exts]
+
+
 def ingest_into_resolve(
     shoot_folder: str | Path,
     clip_paths: dict[str, list[str]],
@@ -181,15 +225,20 @@ def ingest_into_resolve(
     """
     Full Resolve import for one shoot. Serialised behind the module lock.
 
-    clip_paths keys: "a_cam", "photos", "assets"
-    Returns: { "a_cam": N, "photos": N, "assets": N, "total": N }
+    Imports everything in the organised folder structure — both clips that were
+    moved in this ingest run (via clip_paths) AND any clips already in place from
+    a prior run. import_clips() deduplicates against what Resolve already has, so
+    this is safe to call repeatedly.
+
+    Returns: { "a_cam": N, "c_cam": N, "photos": N, "assets": N, "total": N }
     """
     _acquire_lock()
     try:
         resolve = get_resolve()
         pm = resolve.GetProjectManager()
 
-        shoot_name = Path(shoot_folder).name
+        folder = Path(shoot_folder)
+        shoot_name = folder.name
         project = pm.GetCurrentProject()
         if project is None:
             project = pm.CreateProject(shoot_name)
@@ -209,18 +258,35 @@ def ingest_into_resolve(
 
         counts: dict[str, int] = {}
 
-        a_cam_clips = import_clips(mp, bins["a_cam"], clip_paths.get("a_cam", []))
+        # Union of newly-moved clips + clips already in organised dirs so that
+        # re-ingesting an already-organised folder still populates Resolve fully.
+        def _union(key: str, directory: Path, exts: set[str]) -> list[str]:
+            return list(set(clip_paths.get(key, []) + _scan_dir(directory, exts)))
+
+        a_cam_paths = _union("a_cam", folder / "01_VIDEOS" / "A_CAM", _VIDEO_EXTS)
+        a_cam_clips = import_clips(mp, bins["a_cam"], a_cam_paths)
         counts["a_cam"] = len(a_cam_clips)
         for clip in a_cam_clips:
             set_clip_metadata(clip, clip_meta)
 
-        photo_clips = import_clips(mp, bins["photos"], clip_paths.get("photos", []))
+        c_cam_paths = _union("c_cam", folder / "01_VIDEOS" / "C_CAM", _VIDEO_EXTS)
+        c_cam_clips = import_clips(mp, bins["c_cam"], c_cam_paths)
+        counts["c_cam"] = len(c_cam_clips)
+        for clip in c_cam_clips:
+            set_clip_metadata(clip, clip_meta)
+
+        photo_paths = _union("photos", folder / "02_PHOTOS", _PHOTO_EXTS)
+        photo_clips = import_clips(mp, bins["photos"], photo_paths, stills=True)
         counts["photos"] = len(photo_clips)
         for clip in photo_clips:
             set_clip_metadata(clip, clip_meta)
 
         asset_clips = import_clips(mp, bins["assets"], clip_paths.get("assets", []))
         counts["assets"] = len(asset_clips)
+
+        thumb_paths = _union("thumbnails", folder / "03_ASSETS" / "Thumbnails", _PHOTO_EXTS)
+        thumb_clips = import_clips(mp, bins["thumbnails"], thumb_paths, stills=True)
+        counts["thumbnails"] = len(thumb_clips)
 
         counts["total"] = sum(counts.values())
         return counts

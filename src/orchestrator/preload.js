@@ -12,6 +12,11 @@ const { contextBridge, ipcRenderer } = require("electron/renderer");
 
 contextBridge.exposeInMainWorld("cairn", {
   /**
+   * Open a native folder picker. Returns the chosen absolute path, or null if cancelled.
+   */
+  openFolder: () => ipcRenderer.invoke("cairn:dialog:open-folder"),
+
+  /**
    * Proof-of-life snapshot of Resolve state (project/timeline names).
    * Safe to call before Resolve is open — returns `{ available: false, ... }`.
    */

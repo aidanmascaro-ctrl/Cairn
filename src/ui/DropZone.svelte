@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { afterUpdate, onMount } from "svelte";
+  import { afterUpdate } from "svelte";
   import type { CairnBridge, IngestProgressEvent, IngestResult } from "./types";
 
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -14,13 +14,7 @@
   let result: IngestResult | null = null;
   let errorMsg = "";
 
-  let folderInput: HTMLInputElement;
   let progressLogEl: HTMLDivElement | undefined;
-
-  onMount(() => {
-    // webkitdirectory is not a standard HTML attribute — set via DOM to avoid TS errors
-    folderInput.setAttribute("webkitdirectory", "");
-  });
 
   afterUpdate(() => {
     if (progressLogEl !== undefined) {
@@ -48,19 +42,10 @@
     if (f.path) folderPath = f.path;
   }
 
-  function handleFolderPick() {
-    const files = folderInput.files;
-    if (!files || files.length === 0) return;
-    const first = files[0] as File & { path?: string };
-    if (first.path && first.webkitRelativePath) {
-      // Derive chosen directory from first file's absolute path and relative path
-      // first.path = "/parent/chosen/sub/file.ext"
-      // first.webkitRelativePath = "chosen/sub/file.ext"
-      const prefix = first.path.slice(0, first.path.length - first.webkitRelativePath.length);
-      const topDir = first.webkitRelativePath.split("/")[0] ?? "";
-      folderPath = prefix + topDir;
-    }
-    folderInput.value = "";
+  async function pickFolder() {
+    if (!cairn) return;
+    const picked = await cairn.openFolder();
+    if (picked) folderPath = picked;
   }
 
   async function runIngest() {
@@ -95,8 +80,12 @@
         return `✓ Wrote ${String(ev.count ?? 0)} sidecar JSON file(s)`;
       case "resolve_imported":
         return `✓ Imported to Resolve`;
+      case "resolve_flat_import":
+        return `⚠ Imported flat (no bin structure) — ${ev.reason ?? "enable External scripting in Resolve Preferences"}`;
       case "resolve_skipped":
         return `⚠ Resolve skipped: ${ev.reason ?? ""}`;
+      case "org_skipped":
+        return `⚠ Organisation skipped: ${ev.reason ?? ""}`;
       default:
         return ev.event;
     }
@@ -110,9 +99,6 @@
     errorMsg = "";
   }
 </script>
-
-<!-- Hidden file input — webkitdirectory set in onMount -->
-<input bind:this={folderInput} type="file" class="hidden-input" on:change={handleFolderPick} />
 
 <section class="card">
   <h2>Ingest</h2>
@@ -129,12 +115,7 @@
     >
       <p class="drop-hint">Drop shoot folder here</p>
       <span class="drop-or">or</span>
-      <button
-        class="pick-btn"
-        on:click={() => {
-          folderInput.click();
-        }}>Choose folder…</button
-      >
+      <button class="pick-btn" on:click={pickFolder}>Choose folder…</button>
     </div>
 
     {#if folderPath}
@@ -164,6 +145,10 @@
         <dd>{result.files_moved}</dd>
         <dt>A-cam clips</dt>
         <dd>{result.clip_paths.a_cam.length}</dd>
+        {#if result.clip_paths.c_cam.length > 0}
+          <dt>C-cam (drone)</dt>
+          <dd>{result.clip_paths.c_cam.length}</dd>
+        {/if}
         <dt>Photos</dt>
         <dd>{result.clip_paths.photos.length}</dd>
       </dl>
@@ -186,9 +171,6 @@
 </section>
 
 <style>
-  .hidden-input {
-    display: none;
-  }
   .card {
     background: #1f1f21;
     border: 1px solid #2a2a2c;

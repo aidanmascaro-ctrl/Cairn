@@ -109,6 +109,14 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
                 kind="video",
                 metadata=metadata,
             )
+        for clip_path in clip_paths.get("c_cam", []):
+            sidecar.write_clip(
+                shoot_folder=shoot_folder,
+                absolute_path=clip_path,
+                bin_path="01_VIDEOS/C_CAM",
+                kind="video",
+                metadata=metadata,
+            )
         for clip_path in clip_paths.get("photos", []):
             sidecar.write_clip(
                 shoot_folder=shoot_folder,
@@ -118,11 +126,16 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
                 metadata=metadata,
             )
 
+        sidecar_count = (
+            len(clip_paths.get("a_cam", []))
+            + len(clip_paths.get("c_cam", []))
+            + len(clip_paths.get("photos", []))
+        )
         yield {
             "id": msg_id,
             "type": "ingest_progress",
             "event": "sidecars_written",
-            "count": len(clip_paths.get("a_cam", [])) + len(clip_paths.get("photos", [])),
+            "count": sidecar_count,
         }
 
     # ── Resolve import ────────────────────────────────────────────────────────

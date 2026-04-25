@@ -11,7 +11,7 @@
 
 "use strict";
 
-const { app, BrowserWindow, ipcMain, safeStorage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
@@ -133,6 +133,9 @@ try {
   console.warn("[cairn] Install the plugin into Resolve to exercise the real API.");
 }
 
+/** @type {import('electron').BrowserWindow|null} */
+let mainWindow = null;
+
 /** Cached Resolve interface objects — initialised on first use. */
 let initObj = null;
 let resolvePromiseObj = null;
@@ -204,6 +207,158 @@ async function getResolveSnapshot() {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+// ── Resolve media pool helpers ────────────────────────────────────────────────
+
+const VIDEO_EXTS = new Set([".mp4", ".mov", ".mxf", ".avi", ".m2ts"]);
+const PHOTO_EXTS = new Set([".arw", ".jpg", ".jpeg", ".dng", ".cr2", ".cr3", ".nef", ".raf"]);
+
+/**
+ * Return absolute paths of all files in dirPath whose extension is in exts.
+ * @param {string} dirPath
+ * @param {Set<string>} exts
+ * @returns {string[]}
+ */
+function scanDir(dirPath, exts) {
+  try {
+    if (!fs.existsSync(dirPath)) return [];
+    return fs
+      .readdirSync(dirPath)
+      .filter((name) => exts.has(path.extname(name).toLowerCase()))
+      .map((name) => path.join(dirPath, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Spawn resolve_import.py as a separate process with a hard kill timeout.
+ * Returns the number of clips imported, or throws on failure/timeout.
+ * @param {string} folder
+ * @returns {Promise<number>}
+ */
+function importViaResolveScript(folder) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, "..", "workers", "resolve_import.py");
+    const proc = require("node:child_process").spawn(getPythonPath(), [scriptPath, folder], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      reject(new Error("resolve_import.py timed out (120 s) — Resolve scripting may be blocked"));
+    }, 120_000);
+
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on("data", (d) => {
+      process.stderr.write(`[resolve_import] ${d}`);
+      stderr += d.toString();
+    });
+    proc.on("exit", () => {
+      clearTimeout(timer);
+      try {
+        const result = JSON.parse(stdout.trim());
+        if (result.ok) {
+          resolve(result.count);
+        } else {
+          // Include traceback if present so the UI can show the real cause
+          const msg = result.error ?? "resolve_import.py returned ok:false";
+          reject(new Error(result.traceback ? `${msg}\n${result.traceback}` : msg));
+        }
+      } catch {
+        // stdout was not JSON — the script crashed before writing anything
+        const detail =
+          stderr.trim().split("\n").slice(-3).join(" | ") || stdout.trim() || "no output";
+        reject(new Error(`resolve_import.py crash: ${detail}`));
+      }
+    });
+  });
+}
+
+/**
+ * Import the organised shoot folder into Resolve's media pool.
+ *
+ * Strategy 1 — Python Scripting API subprocess (preferred):
+ *   Spawns resolve_import.py which calls mp.ImportMedia([folder]) via the
+ *   full Python Scripting API. This supports recursive folder import with bin
+ *   structure, identical to dragging the folder into the media pool manually.
+ *   The subprocess is killed after 15 s if it hangs.
+ *
+ * Strategy 2 — JS flat import (fallback):
+ *   If Python fails, import individual file paths directly via the JS
+ *   WorkflowIntegration API into Master (no bin structure, but clips land).
+ *
+ * @param {object} ingestResult
+ * @param {Electron.WebContents} sender
+ * @param {string} msgId
+ * @returns {Promise<{total: number}|null>}
+ */
+async function importFolderToResolve(ingestResult, sender, msgId) {
+  const folder = ingestResult.folder;
+  let total = 0;
+
+  // ── Strategy 1: Python Scripting API (creates proper bin structure) ──────
+  // Mirrors the drag-and-drop behavior: pass the folder to ImportMedia with
+  // Master as the active bin so Resolve creates bins matching the filesystem.
+  // Requires Resolve → Preferences → General → External scripting: Local.
+  let pythonFailReason = null;
+  try {
+    total = await importViaResolveScript(folder);
+  } catch (err) {
+    pythonFailReason = err.message;
+    process.stderr.write(`[cairn] Python Resolve import failed: ${err.message}\n`);
+  }
+
+  // ── Strategy 2: JS flat import (fallback — no bin structure) ─────────────
+  // Only runs if Python failed. Clips land in Master without bins.
+  // User must enable "External scripting: Local" in Resolve to get bins.
+  if (total === 0) {
+    const resolveObj = await getResolve();
+    const pm = resolveObj ? await resolveObj.GetProjectManager() : null;
+    const project = pm ? await pm.GetCurrentProject() : null;
+    const mp = project ? await project.GetMediaPool() : null;
+
+    if (mp) {
+      const mediaPaths = [
+        ...scanDir(path.join(folder, "01_VIDEOS", "A_CAM"), VIDEO_EXTS),
+        ...scanDir(path.join(folder, "01_VIDEOS", "B_CAM"), VIDEO_EXTS),
+        ...scanDir(path.join(folder, "01_VIDEOS", "C_CAM"), VIDEO_EXTS),
+        ...scanDir(path.join(folder, "02_PHOTOS"), PHOTO_EXTS),
+      ];
+      if (mediaPaths.length) {
+        const imported = await mp.ImportMedia(mediaPaths);
+        total = imported ? imported.length : 0;
+        if (total > 0 && pythonFailReason && sender && !sender.isDestroyed()) {
+          // Tell the user WHY they got flat import instead of bins
+          sender.send("cairn:ingest:progress", {
+            id: msgId,
+            type: "ingest_progress",
+            event: "resolve_flat_import",
+            reason: pythonFailReason,
+            count: total,
+          });
+        }
+      }
+    }
+  }
+
+  if (sender && !sender.isDestroyed()) {
+    sender.send("cairn:ingest:progress", {
+      id: msgId,
+      type: "ingest_progress",
+      event: total > 0 ? "resolve_imported" : "resolve_skipped",
+      ...(total > 0
+        ? { total }
+        : { reason: pythonFailReason ?? "No media files found to import." }),
+    });
+  }
+
+  return { total };
 }
 
 // ── Key storage (safeStorage + encrypted JSON file) ──────────────────────────
@@ -306,6 +461,15 @@ async function validateKey(type, key) {
 }
 
 function registerIpc() {
+  ipcMain.handle("cairn:dialog:open-folder", async () => {
+    // Pass mainWindow as parent so the sheet appears attached to the plugin
+    // window rather than hiding behind DaVinci Resolve.
+    const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      properties: ["openDirectory"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
   ipcMain.handle("cairn:resolve:snapshot", async () => getResolveSnapshot());
   ipcMain.handle("cairn:ping", async () => ({
     ok: true,
@@ -341,18 +505,85 @@ function registerIpc() {
   });
 
   ipcMain.handle("cairn:ingest", async (event, payload) => {
-    return callPython(
-      { type: "ingest", payload },
-      {
-        timeoutMs: 5 * 60 * 1_000, // 5 min — ingest can take time on large cards
-        onProgress: (progressEvent) => {
-          // Push progress events to the renderer without resolving the IPC call
-          if (!event.sender.isDestroyed()) {
-            event.sender.send("cairn:ingest:progress", progressEvent);
-          }
-        },
-      },
-    );
+    // Python handles file organisation; Resolve import is done here via the JS
+    // WorkflowIntegration API (Python Scripting API hangs from a plugin subprocess).
+    const pythonPayload = { ...payload, resolve: false };
+
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:ingest:progress", obj);
+    };
+
+    // ── Python organisation (45 s hard timeout) ───────────────────────────────
+    // send2trash and rglob on large external drives can stall indefinitely.
+    // If Python times out we skip organisation and still attempt Resolve import.
+    let result = null;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "ingest", payload: pythonPayload },
+          {
+            timeoutMs: 45_000,
+            onProgress: (progressEvent) => sendProgress(progressEvent),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(
+            () => rej(new Error("Organisation timed out (45 s) — skipping to Resolve import")),
+            45_000,
+          ),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "ingest_progress",
+        event: "org_skipped",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Build a minimal result from payload if Python didn't complete
+    if (!result || result.type !== "ingest_complete") {
+      result = {
+        type: "ingest_complete",
+        folder: payload.path,
+        files_moved: 0,
+        shells_removed: 0,
+        metadata: {},
+        clip_paths: { a_cam: [], c_cam: [], photos: [], assets: [] },
+        resolve_counts: {},
+        dry_run: payload.dry_run ?? false,
+      };
+    }
+
+    // ── Resolve import (15 s hard timeout) ───────────────────────────────────
+    if (!payload.dry_run) {
+      const msgId = "";
+      try {
+        const resolveCounts = await Promise.race([
+          importFolderToResolve(result, event.sender, msgId),
+          new Promise((_res, rej) =>
+            setTimeout(() => rej(new Error("Resolve import timed out (150 s)")), 150_000),
+          ),
+        ]);
+        if (resolveCounts) {
+          result.resolve_counts = resolveCounts;
+        } else {
+          sendProgress({
+            type: "ingest_progress",
+            event: "resolve_skipped",
+            reason: "WorkflowIntegration not available — install the plugin into Resolve.",
+          });
+        }
+      } catch (err) {
+        sendProgress({
+          type: "ingest_progress",
+          event: "resolve_skipped",
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return result;
   });
 }
 
@@ -383,7 +614,10 @@ function createMainWindow() {
     win.webContents.openDevTools({ mode: "detach" });
   }
 
+  mainWindow = win;
+
   win.on("close", () => {
+    mainWindow = null;
     if (WorkflowIntegration) {
       try {
         WorkflowIntegration.CleanUp();

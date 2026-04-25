@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import sys
 import xml.etree.ElementTree as ET
@@ -23,13 +24,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from send2trash import send2trash
+
 if TYPE_CHECKING:
     pass
 
 # ── File type constants (verbatim from organise.py) ───────────────────────────
 
 VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
-PHOTO_EXTS = {".arw", ".jpg", ".jpeg", ".dng", ".cr2", ".cr3", ".nef", ".raf"}
+PHOTO_EXTS = {".arw", ".jpg", ".jpeg", ".dng", ".cr2", ".cr3", ".nef", ".raf", ".xmp"}
 ASSET_EXTS = {".lut", ".cube", ".bin"}
 ASSET_NAMES = {"MEDIAPRO.XML", "DATABASE.BIN"}
 
@@ -53,6 +56,7 @@ SONY_SHELLS = {
 TEMPLATE_DIRS = [
     "01_VIDEOS/A_CAM",
     "01_VIDEOS/B_CAM",
+    "01_VIDEOS/C_CAM",
     "02_PHOTOS",
     "03_ASSETS",
     "04_EXPORT",
@@ -68,6 +72,42 @@ SKIP_NAMES = {
 }
 
 SYSTEM_PATH_PREFIXES = ["/System/", "/Windows/", "/Program Files/"]
+
+
+# ── DJI detection ────────────────────────────────────────────────────────────
+
+
+def is_dji_clip(name: str) -> bool:
+    """True for files whose name starts with DJI_ (case-insensitive)."""
+    return name.upper().startswith("DJI_")
+
+
+# ── Thumbnail detection ───────────────────────────────────────────────────────
+
+# Matches Sony's T01/T02 thumbnail suffix: "C9418T01" → base "C9418"
+_THUMB_SUFFIX_RE = re.compile(r"^(.+)T\d+$", re.IGNORECASE)
+# Sony camera-generated thumbnail: single letter + digits + T + digits (e.g. C9132T01).
+# Treated as a thumbnail regardless of whether a matching video exists in the folder —
+# thumbnails from a different card session won't share a number range with the videos.
+_SONY_THUMB_RE = re.compile(r"^[A-Za-z]\d+T\d+$", re.IGNORECASE)
+
+
+def is_thumbnail_jpeg(stem: str, video_stems: set[str]) -> bool:
+    """
+    Return True if this JPEG stem belongs to a camera-generated thumbnail.
+
+    Three patterns:
+      1. Exact match       — C9418.JPG  alongside C9418.MP4
+      2. Sony T suffix     — C9418T01.JPG, base stem matches a video in this folder
+      3. Sony pattern only — C9132T01.JPG where no matching video exists (different card session)
+    """
+    lower = stem.lower()
+    if lower in video_stems:
+        return True
+    m = _THUMB_SUFFIX_RE.match(stem)
+    if m and m.group(1).lower() in video_stems:
+        return True
+    return bool(_SONY_THUMB_RE.match(stem))
 
 
 # ── Mode detection ────────────────────────────────────────────────────────────
@@ -179,6 +219,7 @@ def extract_sony_metadata(folder: Path) -> dict[str, str]:
 def collect_files(folder: Path) -> dict[str, list[Path]]:
     buckets: dict[str, list[Path]] = {
         "videos": [],
+        "dji": [],
         "photos": [],
         "thumbnails": [],
         "assets": [],
@@ -186,25 +227,52 @@ def collect_files(folder: Path) -> dict[str, list[Path]]:
     thmbnl = folder / "M4ROOT" / "THMBNL"
     clip = folder / "M4ROOT" / "CLIP"
 
+    # Pass 1 — gather all in-scope files and record video stems so we can
+    # identify co-located JPEG thumbnails (e.g. C9418.JPG beside C9418.MP4)
+    # in the second pass without having to scan twice.
+    all_files: list[Path] = []
+    video_stems: set[str] = set()
+
     for path in folder.rglob("*"):
         if not path.is_file() or path.name == ".DS_Store":
             continue
         rel = path.relative_to(folder).parts
         if rel and rel[0] in {"01_VIDEOS", "02_PHOTOS", "03_ASSETS", "04_EXPORT"}:
             continue
+        all_files.append(path)
+        if path.suffix.lower() in VIDEO_EXTS:
+            video_stems.add(path.stem.lower())
 
+    # Pass 2 — classify
+    for path in all_files:
         ext = path.suffix.lower()
 
         if thmbnl.exists() and thmbnl in path.parents:
+            # Sony THMBNL folder — dedicated thumbnail directory
             buckets["thumbnails"].append(path)
         elif ext in VIDEO_EXTS:
-            buckets["videos"].append(path)
+            if is_dji_clip(path.name):
+                buckets["dji"].append(path)
+            else:
+                buckets["videos"].append(path)
         elif ext == ".xml":
             if clip.exists() and clip in path.parents:
-                buckets["videos"].append(path)
+                # Sony per-clip XML — travels with the video
+                if is_dji_clip(path.stem):
+                    buckets["dji"].append(path)
+                else:
+                    buckets["videos"].append(path)
             else:
                 buckets["assets"].append(path)
+        elif ext in {".jpg", ".jpeg"} and is_thumbnail_jpeg(path.stem, video_stems):
+            # Co-located JPEG whose stem matches a video file (exact or Sony T01/T02
+            # suffix pattern) — camera-generated proxy, not a real photo.
+            buckets["thumbnails"].append(path)
         elif ext in PHOTO_EXTS:
+            buckets["photos"].append(path)
+        elif ext == "":
+            # Extension-less files are photo editing companions (e.g. Photomator
+            # Edit Documents, which carry the same stem as the RAW they belong to).
             buckets["photos"].append(path)
         elif ext in ASSET_EXTS or path.name in ASSET_NAMES:
             buckets["assets"].append(path)
@@ -255,23 +323,54 @@ def move_files(
 
 # ── Empty shell cleanup ───────────────────────────────────────────────────────
 
+# macOS / Windows metadata files that should never block directory removal
+_JUNK_FILES = {".DS_Store", ".localized", "Thumbs.db", "desktop.ini"}
+
+# Template dirs we created — never touch these
+_KEEP_TOPS = {"01_VIDEOS", "02_PHOTOS", "03_ASSETS", "04_EXPORT"}
+
+
+def _is_empty_after_junk(dp: Path) -> bool:
+    """True if dp has no meaningful content (ignores OS junk files)."""
+    for child in dp.iterdir():
+        if child.is_file() and child.name in _JUNK_FILES:
+            continue
+        return False
+    return True
+
 
 def remove_empty_shells(folder: Path, dry_run: bool = False) -> int:
+    """
+    Move to Trash any directory inside `folder` that is empty after file moves.
+    Works bottom-up (topdown=False) so nested empties are cleaned before their
+    parents are checked. Ignores macOS .DS_Store files — removes them first so
+    they don't block directory removal. Never touches the template directories.
+    """
     count = 0
-    shell_names_upper = {s.upper() for s in SONY_SHELLS}
-    for dirpath, _, _ in os.walk(folder, topdown=False):
+    for dirpath, _dirnames, _filenames in os.walk(folder, topdown=False):
         dp = Path(dirpath)
         if dp == folder:
             continue
-        if dp.name.upper() in shell_names_upper:
-            if dry_run:
+        # Never touch the template dirs we created
+        rel = dp.relative_to(folder).parts
+        if rel and rel[0] in _KEEP_TOPS:
+            continue
+        if not _is_empty_after_junk(dp):
+            continue
+        if dry_run:
+            count += 1
+        else:
+            try:
+                # Remove OS junk files so the directory is truly empty first
+                for child in dp.iterdir():
+                    if child.is_file() and child.name in _JUNK_FILES:
+                        child.unlink()
+                # send2trash handles internal drives, external drives, and
+                # Windows Recycle Bin correctly — no manual ~/.Trash needed
+                send2trash(str(dp))
                 count += 1
-            else:
-                try:
-                    dp.rmdir()  # fails if non-empty — intentional
-                    count += 1
-                except OSError:
-                    pass
+            except Exception:  # send2trash raises OSError or TrashPermissionError
+                pass
     return count
 
 
@@ -357,14 +456,21 @@ def run(
     files_moved = 0
     clip_paths: dict[str, list[str]] = {
         "a_cam": [],
+        "c_cam": [],
         "photos": [],
         "assets": [],
     }
 
     for event in move_files(buckets["videos"], folder / "01_VIDEOS" / "A_CAM", dry_run):
         files_moved += 1
-        if event["dst"].endswith(tuple(VIDEO_EXTS)):
+        if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
             clip_paths["a_cam"].append(event["dst"])
+        yield {"type": "progress", **event}
+
+    for event in move_files(buckets["dji"], folder / "01_VIDEOS" / "C_CAM", dry_run):
+        files_moved += 1
+        if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
+            clip_paths["c_cam"].append(event["dst"])
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["photos"], folder / "02_PHOTOS", dry_run):
@@ -372,13 +478,70 @@ def run(
         clip_paths["photos"].append(event["dst"])
         yield {"type": "progress", **event}
 
-    for event in move_files(buckets["thumbnails"], folder / "03_ASSETS", dry_run):
+    for event in move_files(buckets["thumbnails"], folder / "03_ASSETS" / "Thumbnails", dry_run):
         files_moved += 1
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["assets"], folder / "03_ASSETS", dry_run):
         files_moved += 1
         yield {"type": "progress", **event}
+
+    # ── Reclassify DJI clips already sitting in A_CAM → C_CAM ────────────────
+    # Handles folders that were ingested before C_CAM support was added.
+    a_cam_dir = folder / "01_VIDEOS" / "A_CAM"
+    c_cam_dir = folder / "01_VIDEOS" / "C_CAM"
+    if a_cam_dir.is_dir():
+        dji_in_a_cam = [
+            f
+            for f in a_cam_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in VIDEO_EXTS and is_dji_clip(f.name)
+        ]
+        for event in move_files(dji_in_a_cam, c_cam_dir, dry_run):
+            files_moved += 1
+            if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
+                clip_paths["c_cam"].append(event["dst"])
+            yield {"type": "progress", **event}
+
+    # ── Reclassify XMP sidecars already sitting in 03_ASSETS → 02_PHOTOS ────────
+    # Handles folders ingested before .xmp was recognised as a photo companion.
+    assets_dir = folder / "03_ASSETS"
+    photos_dir = folder / "02_PHOTOS"
+    if assets_dir.is_dir():
+        xmp_in_assets = [
+            f
+            for f in assets_dir.iterdir()
+            if f.is_file() and (f.suffix.lower() == ".xmp" or f.suffix == "")
+        ]
+        for event in move_files(xmp_in_assets, photos_dir, dry_run):
+            files_moved += 1
+            clip_paths["photos"].append(event["dst"])
+            yield {"type": "progress", **event}
+
+    # ── Reclassify thumbnail JPEGs in 02_PHOTOS → 03_ASSETS/Thumbnails ───────
+    # Handles folders ingested before thumbnail detection was added. Any JPEG in
+    # 02_PHOTOS whose stem matches a video file in A_CAM or C_CAM is a proxy,
+    # not a real photo.
+    thumbnails_dir = folder / "03_ASSETS" / "Thumbnails"
+    if photos_dir.is_dir():
+        video_stems_in_place: set[str] = set()
+        for cam_dir in (
+            folder / "01_VIDEOS" / "A_CAM",
+            folder / "01_VIDEOS" / "C_CAM",
+        ):
+            if cam_dir.is_dir():
+                for f in cam_dir.iterdir():
+                    if f.is_file() and f.suffix.lower() in VIDEO_EXTS:
+                        video_stems_in_place.add(f.stem.lower())
+        thumb_jpegs_in_photos = [
+            f
+            for f in photos_dir.iterdir()
+            if f.is_file()
+            and f.suffix.lower() in {".jpg", ".jpeg"}
+            and is_thumbnail_jpeg(f.stem, video_stems_in_place)
+        ]
+        for event in move_files(thumb_jpegs_in_photos, thumbnails_dir, dry_run):
+            files_moved += 1
+            yield {"type": "progress", **event}
 
     # ── Empty shell cleanup ───────────────────────────────────────────────────
     shells_removed = remove_empty_shells(folder, dry_run)
