@@ -28,6 +28,7 @@ import ingest as ingest_worker
 import resolve_api
 import sidecar
 import transcribe as transcribe_worker
+import vision as vision_worker
 
 # ── Single-response handlers ──────────────────────────────────────────────────
 
@@ -125,12 +126,31 @@ def handle_update_speaker_labels(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_vision_estimate(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return B-ROLL clip count + estimated Claude vision cost for the shoot folder.
+    payload: { path: str }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    clips = vision_worker.scan_broll_clips(path)
+    estimate = vision_worker.estimate_vision(clips)
+
+    return {
+        "id": msg["id"],
+        "type": "vision_estimate_result",
+        **estimate,
+    }
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
     "classify_confirm": handle_classify_confirm,
     "transcribe_estimate": handle_transcribe_estimate,
     "update_speaker_labels": handle_update_speaker_labels,
+    "vision_estimate": handle_vision_estimate,
 }
 
 
@@ -347,10 +367,54 @@ def handle_transcribe(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield {"id": msg_id, "type": "transcribe_progress", "resolve_ok": resolve_ok, **event}
 
 
+def handle_vision(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """
+    Tag all B-ROLL clips in a shoot folder with Claude vision.
+
+    Expected payload keys:
+      path          -- absolute path to organised shoot folder (required)
+      api_key       -- Anthropic API key (required when cloud_allowed=True)
+      cloud_allowed -- bool, default True (False → local fallback, not yet in v1)
+      dry_run       -- bool, default False (skip Resolve Keywords write when True)
+
+    Yields vision_progress events per clip, then vision_complete.
+    """
+    payload = msg.get("payload", {})
+    msg_id: str = msg["id"]
+
+    path: str = payload["path"]
+    api_key: str = payload.get("api_key", "")
+    cloud_allowed: bool = bool(payload.get("cloud_allowed", True))
+    dry_run: bool = bool(payload.get("dry_run", False))
+
+    clip_paths = vision_worker.scan_broll_clips(path)
+
+    for event in vision_worker.tag_all(clip_paths, path, api_key, cloud_allowed=cloud_allowed):
+        if event.get("event") == "vision_complete":
+            yield {"id": msg_id, "type": "vision_complete", **event}
+            return
+
+        resolve_ok: bool | None = None
+        if not dry_run and event.get("event") == "clip_tagged":
+            keywords = event.get("keywords", "")
+            if keywords:
+                try:
+                    resolve_ok = resolve_api.set_keywords(event["file"], keywords)
+                except Exception as exc:
+                    resolve_ok = False
+                    print(
+                        f"[bridge.py] Keywords write failed for {event['file']}: {exc}",
+                        file=sys.stderr,
+                    )
+
+        yield {"id": msg_id, "type": "vision_progress", "resolve_ok": resolve_ok, **event}
+
+
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
     "classify": handle_classify,
     "transcribe": handle_transcribe,
+    "vision": handle_vision,
 }
 
 

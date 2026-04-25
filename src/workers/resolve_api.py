@@ -381,6 +381,30 @@ def classify_write_resolve(clip_path: str, label: str) -> bool:
         _release_lock()
 
 
+def set_keywords(clip_path: str, keywords: str) -> bool:
+    """
+    Write the Keywords metadata field for a clip and mark it as indexed.
+    Returns True on success, False if Resolve is unavailable or clip not found.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        set_clip_metadata(clip, {"Keywords": keywords, "Cairn Stage": "indexed"})
+        return True
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()
+
+
 def add_subtitle_track(clip_path: str, srt_path: str) -> bool:
     """
     Attach an SRT subtitle file to the Resolve clip at clip_path.

@@ -213,6 +213,73 @@ export interface TranscribeApi {
   labelSpeakers(payload: SpeakerLabelPayload): Promise<SpeakerLabelResult>;
 }
 
+export interface VisionEstimateResult {
+  type: "vision_estimate_result";
+  clip_count: number;
+  estimated_cost_usd: number;
+}
+
+export interface VisionTags {
+  subjects: string[];
+  actions: string[];
+  shot_type: string;
+  mood: string;
+  environment: string;
+  colour_palette: string[];
+  time_of_day: string;
+  lighting_style: string;
+  camera_motion: string;
+  confidence: number;
+}
+
+export interface VisionJudgeResult {
+  subjects_score: number;
+  actions_score: number;
+  shot_type_score: number;
+  mood_score: number;
+  overall_score: number;
+  low_confidence_fields: string[];
+  notes?: string;
+}
+
+export interface VisionProgressEvent {
+  event:
+    | "vision_started"
+    | "clip_tagged"
+    | "clip_skipped"
+    | "clip_error"
+    | "judge_flagged"
+    | "vision_complete";
+  file?: string;
+  tags?: VisionTags;
+  keywords?: string;
+  judge?: VisionJudgeResult;
+  low_fields?: string[];
+  reason?: string;
+  resolve_ok?: boolean | null;
+  total_clips?: number;
+  // vision_complete summary fields
+  total?: number;
+  tagged?: number;
+  skipped?: number;
+  errors?: number;
+  judge_samples?: number;
+}
+
+export interface VisionResult {
+  total: number;
+  tagged: number;
+  skipped: number;
+  errors: number;
+  judge_samples: number;
+}
+
+export interface VisionApi {
+  estimate(payload: { path: string }): Promise<VisionEstimateResult>;
+  run(payload: { path: string; cloud_allowed?: boolean; dry_run?: boolean }): Promise<VisionResult>;
+  onProgress(callback: (event: VisionProgressEvent) => void): () => void;
+}
+
 export interface CairnBridge {
   openFolder(): Promise<string | null>;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
@@ -221,5 +288,6 @@ export interface CairnBridge {
   ingest: IngestApi;
   classify: ClassifyApi;
   transcribe: TranscribeApi;
+  vision: VisionApi;
   keys: KeysApi;
 }

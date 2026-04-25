@@ -111,6 +111,29 @@ contextBridge.exposeInMainWorld("cairn", {
     labelSpeakers: (payload) => ipcRenderer.invoke("cairn:transcribe:label-speakers", payload),
   },
 
+  vision: {
+    /**
+     * Get B-ROLL clip count + estimated Claude vision cost for a shoot folder.
+     * @param {{ path: string }} payload
+     */
+    estimate: (payload) => ipcRenderer.invoke("cairn:vision:estimate", payload),
+    /**
+     * Run Claude vision tagging on all B-ROLL clips in the shoot folder.
+     * @param {{ path: string, cloud_allowed?: boolean, dry_run?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:vision", payload),
+    /**
+     * Subscribe to vision progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:vision:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:vision:progress", listener);
+    },
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),

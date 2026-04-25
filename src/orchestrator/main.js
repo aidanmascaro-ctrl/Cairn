@@ -642,6 +642,51 @@ function registerIpc() {
     return result ?? { total: 0, transcribed: 0, skipped: 0, errors: 0 };
   });
 
+  ipcMain.handle("cairn:vision:estimate", async (_event, payload) => {
+    return callPython(
+      { type: "vision_estimate", payload: { path: String(payload.path) } },
+      { timeoutMs: 60_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:vision", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:vision:progress", obj);
+    };
+
+    const keys = readStoredKeys();
+    const enrichedPayload = {
+      ...payload,
+      api_key: keys["ANTHROPIC_API_KEY"] ?? "",
+    };
+
+    let result;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "vision", payload: enrichedPayload },
+          {
+            // Allow up to 30 min for large B-roll batches
+            timeoutMs: 1_800_000,
+            onProgress: (ev) => sendProgress(ev),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(() => rej(new Error("Vision timed out (30 min)")), 1_800_000),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "vision_progress",
+        event: "vision_error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return { total: 0, tagged: 0, skipped: 0, errors: 0, judge_samples: 0 };
+    }
+
+    return result ?? { total: 0, tagged: 0, skipped: 0, errors: 0, judge_samples: 0 };
+  });
+
   ipcMain.handle("cairn:ingest", async (event, payload) => {
     // Python handles file organisation; Resolve import is done here via the JS
     // WorkflowIntegration API (Python Scripting API hangs from a plugin subprocess).

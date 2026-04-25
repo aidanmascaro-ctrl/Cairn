@@ -5,6 +5,7 @@
   import DropZone from "./DropZone.svelte";
   import ClassifyPanel from "./ClassifyPanel.svelte";
   import TranscribePanel from "./TranscribePanel.svelte";
+  import VisionPanel from "./VisionPanel.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -101,6 +102,8 @@
   <ClassifyPanel {ingestFolder} />
 
   <TranscribePanel {ingestFolder} />
+
+  <VisionPanel {ingestFolder} />
 
   <Settings />
 
