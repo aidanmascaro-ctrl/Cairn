@@ -1,0 +1,57 @@
+# Node / Electron
+node_modules/
+dist/
+build/
+out/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyrefly/
+
+# Env / secrets (NEVER commit — keys live in OS keychain)
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Packaging artefacts (signed installers are built, not committed)
+packaging/out/
+packaging/cert/
+*.dmg
+*.exe
+*.pkg
+
+# Vendored binaries (heavy — fetched by a setup script)
+assets/bin/ffmpeg
+assets/bin/ffmpeg.exe
+assets/bin/ffprobe
+assets/bin/ffprobe.exe
+
+# Plugin runtime state (should only ever live in the user's project folder,
+# but guard against accidental captures during dev)
+.cairn/
+*.cairn.log
+
+# Test coverage
+coverage/
+.nyc_output/
+htmlcov/
