@@ -53,6 +53,36 @@ contextBridge.exposeInMainWorld("cairn", {
     },
   },
 
+  classify: {
+    /**
+     * Run VAD classification on all video clips in a shoot folder.
+     * @param {{ path: string, dry_run?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:classify", payload),
+    /**
+     * Subscribe to classify progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:classify:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:classify:progress", listener);
+    },
+    /**
+     * Extract a thumbnail frame from a clip at ~3 s. Returns a data: URL or null.
+     * @param {string} clipPath
+     * @returns {Promise<{dataUrl: string|null}>}
+     */
+    thumbnail: (clipPath) => ipcRenderer.invoke("cairn:classify:thumbnail", { clipPath }),
+    /**
+     * Confirm a user-overridden classification for an AMBIGUOUS clip.
+     * Updates sidecar and Resolve.
+     * @param {{ clip_path: string, label: string, shoot_folder: string }} payload
+     */
+    confirm: (payload) => ipcRenderer.invoke("cairn:classify:confirm", payload),
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),

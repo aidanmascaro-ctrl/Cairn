@@ -14,6 +14,7 @@
 const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { createInterface } = require("node:readline");
 const { randomUUID } = require("node:crypto");
@@ -51,6 +52,12 @@ function getPythonPath() {
   return "python3";
 }
 
+function getFfmpegPath() {
+  const bundled = path.join(__dirname, "..", "..", "assets", "bin", "ffmpeg");
+  if (fs.existsSync(bundled)) return bundled;
+  return "ffmpeg";
+}
+
 function getBridgeScriptPath() {
   // main.js is at <plugin>/src/orchestrator/main.js; bridge.py is at <plugin>/src/workers/bridge.py
   return path.join(__dirname, "..", "workers", "bridge.py");
@@ -75,8 +82,8 @@ function ensurePythonWorker() {
     }
     const pending = pythonPending.get(msg.id);
     if (!pending) return;
-    // Progress events: call callback, keep promise alive
-    if (msg.type === "ingest_progress") {
+    // Progress events (any *_progress type): call callback, keep promise alive
+    if (msg.type.endsWith("_progress")) {
       pending.onProgress?.(msg);
       return;
     }
@@ -502,6 +509,88 @@ function registerIpc() {
 
   ipcMain.handle("cairn:keys:validate", async (_event, { type, key }) => {
     return validateKey(String(type), String(key));
+  });
+
+  ipcMain.handle("cairn:classify:thumbnail", async (_event, { clipPath }) => {
+    const ffmpegExe = getFfmpegPath();
+    const tmpFile = path.join(os.tmpdir(), `cairn-thumb-${randomUUID()}.jpg`);
+    try {
+      await new Promise((resolve, reject) => {
+        const proc = spawn(
+          ffmpegExe,
+          [
+            "-y",
+            "-ss",
+            "3",
+            "-i",
+            clipPath,
+            "-frames:v",
+            "1",
+            "-q:v",
+            "5",
+            "-vf",
+            "scale=320:-1",
+            tmpFile,
+          ],
+          { stdio: ["ignore", "ignore", "pipe"] },
+        );
+        let stderr = "";
+        proc.stderr.on("data", (d) => {
+          stderr += d.toString();
+        });
+        proc.on("exit", (code) => {
+          if (code === 0) resolve(undefined);
+          else reject(new Error(`ffmpeg ${String(code)}: ${stderr.slice(-120)}`));
+        });
+      });
+      const data = fs.readFileSync(tmpFile);
+      return { dataUrl: `data:image/jpeg;base64,${data.toString("base64")}` };
+    } catch (err) {
+      process.stderr.write(`[cairn] thumbnail failed for ${clipPath}: ${err.message}\n`);
+      return { dataUrl: null };
+    } finally {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        /* noop */
+      }
+    }
+  });
+
+  ipcMain.handle("cairn:classify:confirm", async (_event, payload) => {
+    return callPython({ type: "classify_confirm", payload }, { timeoutMs: 30_000 });
+  });
+
+  ipcMain.handle("cairn:classify", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:classify:progress", obj);
+    };
+
+    let result;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "classify", payload },
+          {
+            // VAD on many clips can take several minutes; allow up to 10 min
+            timeoutMs: 600_000,
+            onProgress: (progressEvent) => sendProgress(progressEvent),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(() => rej(new Error("Classify timed out (10 min)")), 600_000),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "classify_progress",
+        event: "classify_error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
+    }
+
+    return result ?? { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
   });
 
   ipcMain.handle("cairn:ingest", async (event, payload) => {

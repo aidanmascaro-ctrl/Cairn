@@ -23,6 +23,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
+import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
 import sidecar
@@ -48,9 +49,47 @@ def handle_echo(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Persist a user-confirmed classification override for one clip.
+    Updates the sidecar JSON, then writes Keywords + clip colour to Resolve.
+    """
+    payload = msg.get("payload", {})
+    clip_path: str = payload["clip_path"]
+    label: str = payload["label"]
+    shoot_folder: str = payload["shoot_folder"]
+
+    import sidecar as sid
+
+    sid.merge_clip(
+        shoot_folder,
+        clip_path,
+        updates={"classification": label, "user_confirmed": True},
+        new_stage=None,
+    )
+
+    resolve_ok = False
+    try:
+        resolve_ok = resolve_api.classify_write_resolve(clip_path, label)
+    except Exception as exc:
+        print(
+            f"[bridge.py] classify_confirm resolve write failed: {exc}",
+            file=sys.stderr,
+        )
+
+    return {
+        "id": msg["id"],
+        "type": "classify_confirm_ok",
+        "clip_path": clip_path,
+        "label": label,
+        "resolve_ok": resolve_ok,
+    }
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
+    "classify_confirm": handle_classify_confirm,
 }
 
 
@@ -175,8 +214,54 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
     }
 
 
+def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """
+    Run VAD classification on every video clip in a shoot folder.
+
+    Expected payload keys:
+      path    -- absolute path to the organised shoot folder (required)
+      dry_run -- bool, default false (skip Resolve writes when true)
+
+    Yields classify_progress events per clip, then classify_complete.
+    """
+    payload = msg.get("payload", {})
+    msg_id: str = msg["id"]
+
+    path: str = payload["path"]
+    dry_run: bool = bool(payload.get("dry_run", False))
+
+    clip_paths = classify_worker.scan_video_clips(path)
+    total = len(clip_paths)
+
+    yield {
+        "id": msg_id,
+        "type": "classify_progress",
+        "event": "classify_started",
+        "total_clips": total,
+    }
+
+    for event in classify_worker.classify_all(clip_paths, path):
+        if event.get("event") == "classify_complete":
+            yield {"id": msg_id, "type": "classify_complete", **event}
+            return
+
+        resolve_ok: bool | None = None
+        if not dry_run and event.get("event") == "clip_classified":
+            try:
+                resolve_ok = resolve_api.classify_write_resolve(event["file"], event["label"])
+            except Exception as exc:
+                resolve_ok = False
+                print(
+                    f"[bridge.py] Resolve write failed for {event['file']}: {exc}",
+                    file=sys.stderr,
+                )
+
+        yield {"id": msg_id, "type": "classify_progress", "resolve_ok": resolve_ok, **event}
+
+
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
+    "classify": handle_classify,
 }
 
 

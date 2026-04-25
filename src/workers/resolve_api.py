@@ -293,3 +293,89 @@ def ingest_into_resolve(
 
     finally:
         _release_lock()
+
+
+# ── Classify helpers ──────────────────────────────────────────────────────────
+
+# Full set of valid SetClipColor values. Validated at call time; invalid value
+# raises ValueError rather than silently sending a bad string to Resolve.
+VALID_CLIP_COLORS: frozenset[str] = frozenset(
+    {
+        "Blue",
+        "Cyan",
+        "Green",
+        "Yellow",
+        "Red",
+        "Pink",
+        "Purple",
+        "Fuchsia",
+        "Rose",
+        "Lavender",
+        "Sky",
+        "Mint",
+        "Lemon",
+        "Sand",
+        "Cocoa",
+        "Cream",
+        "Orange",
+    }
+)
+
+_LABEL_COLOR: dict[str, str] = {
+    "A-ROLL": "Blue",
+    "B-ROLL": "Green",
+    "AMBIGUOUS": "Yellow",
+}
+
+
+def set_clip_color(clip: Any, color: str) -> None:
+    """Set clip colour via SetClipColor. Raises ValueError for unknown colors."""
+    if color not in VALID_CLIP_COLORS:
+        raise ValueError(f"Invalid clip color {color!r}. Valid values: {sorted(VALID_CLIP_COLORS)}")
+    clip.SetClipColor(color)
+
+
+def _search_folder(folder: Any, file_path: str) -> Any | None:
+    """Recursively search a MediaPool folder tree for a clip by File Path."""
+    for clip in folder.GetClipList() or []:
+        if clip and clip.GetClipProperty("File Path") == file_path:
+            return clip
+    for sub in folder.GetSubFolderList() or []:
+        found = _search_folder(sub, file_path)
+        if found:
+            return found
+    return None
+
+
+def get_clip_by_path(media_pool: Any, file_path: str) -> Any | None:
+    """Return the MediaPoolItem whose File Path matches, or None."""
+    return _search_folder(media_pool.GetRootFolder(), file_path)
+
+
+def classify_write_resolve(clip_path: str, label: str) -> bool:
+    """
+    Write classification label (Keywords) and clip colour to Resolve.
+    Acquires the module lock -- must not be called while ingest_into_resolve is
+    running in the same process.
+    Returns True on success, False if Resolve unavailable or clip not found.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        set_clip_metadata(clip, {"Keywords": label})
+        color = _LABEL_COLOR.get(label)
+        if color:
+            set_clip_color(clip, color)
+        return True
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()

@@ -98,11 +98,67 @@ export interface IngestApi {
   onProgress(callback: (event: IngestProgressEvent) => void): () => void;
 }
 
+export type ClassifyLabel = "A-ROLL" | "B-ROLL" | "AMBIGUOUS" | "UNKNOWN";
+
+export interface ClassifyPayload {
+  path: string;
+  dry_run?: boolean;
+}
+
+export interface ClassifyProgressEvent {
+  event: "classify_started" | "clip_classified" | "clip_skipped" | "classify_complete";
+  file?: string;
+  label?: ClassifyLabel;
+  speech_ratio?: number;
+  audio_stream?: boolean;
+  resolve_ok?: boolean | null;
+  total_clips?: number;
+  // summary fields (classify_complete)
+  a_roll?: number;
+  b_roll?: number;
+  ambiguous?: number;
+  skipped?: number;
+  total?: number;
+}
+
+export interface ClassifyResult {
+  a_roll: number;
+  b_roll: number;
+  ambiguous: number;
+  skipped: number;
+  total: number;
+}
+
+export interface ThumbnailResult {
+  dataUrl: string | null;
+}
+
+export interface ClassifyConfirmPayload {
+  clip_path: string;
+  label: ClassifyLabel;
+  shoot_folder: string;
+}
+
+export interface ClassifyConfirmResult {
+  type: "classify_confirm_ok";
+  clip_path: string;
+  label: ClassifyLabel;
+  resolve_ok: boolean;
+}
+
+export interface ClassifyApi {
+  run(payload: ClassifyPayload): Promise<ClassifyResult>;
+  onProgress(callback: (event: ClassifyProgressEvent) => void): () => void;
+  thumbnail(clipPath: string): Promise<ThumbnailResult>;
+  confirm(payload: ClassifyConfirmPayload): Promise<ClassifyConfirmResult>;
+}
+
 export interface CairnBridge {
   openFolder(): Promise<string | null>;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;
   ingest: IngestApi;
+  classify: ClassifyApi;
   keys: KeysApi;
 }

@@ -74,6 +74,44 @@ def write_clip(
     return target
 
 
+def merge_clip(
+    shoot_folder: str | Path,
+    absolute_path: str | Path,
+    updates: dict,
+    new_stage: str | None = None,
+) -> Path:
+    """
+    Merge additional fields into an existing sidecar, preserving all prior data.
+    Adds new_stage to stages_complete if provided and not already present.
+    Creates a minimal sidecar if none exists.
+    """
+    cid = clip_id(absolute_path)
+    root = sidecar_root(shoot_folder)
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / f"{cid}.json"
+
+    if target.exists():
+        try:
+            record: dict = json.loads(target.read_text())
+        except (json.JSONDecodeError, OSError):
+            record = {"schema_version": SCHEMA_VERSION, "clip_id": cid, "stages_complete": []}
+    else:
+        record = {
+            "schema_version": SCHEMA_VERSION,
+            "clip_id": cid,
+            "source_path": str(Path(absolute_path).resolve()),
+            "stages_complete": [],
+        }
+
+    record.update(updates)
+
+    if new_stage and new_stage not in record.get("stages_complete", []):
+        record["stages_complete"] = [*record.get("stages_complete", []), new_stage]
+
+    target.write_text(json.dumps(record, indent=2))
+    return target
+
+
 def read_clip(shoot_folder: str | Path, absolute_path: str | Path) -> dict | None:
     """
     Read the sidecar for a clip. Returns None if not found or unreadable.

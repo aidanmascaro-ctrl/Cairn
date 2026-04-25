@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { afterUpdate } from "svelte";
+  import { afterUpdate, createEventDispatcher } from "svelte";
   import type { CairnBridge, IngestProgressEvent, IngestResult } from "./types";
+
+  const dispatch = createEventDispatcher<{ ingestComplete: { folder: string } }>();
 
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
 
@@ -62,6 +64,7 @@
     try {
       result = await cairn.ingest.run({ path: folderPath, dry_run: dryRun });
       state = "done";
+      if (!result.dry_run) dispatch("ingestComplete", { folder: result.folder });
     } catch (err) {
       errorMsg = err instanceof Error ? err.message : String(err);
       state = "error";

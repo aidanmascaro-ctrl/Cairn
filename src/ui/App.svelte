@@ -3,6 +3,7 @@
   import type { CairnBridge, ResolveSnapshot, PingResult } from "./types";
   import Settings from "./Settings.svelte";
   import DropZone from "./DropZone.svelte";
+  import ClassifyPanel from "./ClassifyPanel.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -13,6 +14,12 @@
 
   let echoResult: string | null = null;
   let echoRunning = false;
+
+  let ingestFolder: string | null = null;
+
+  function handleIngestComplete(e: CustomEvent<{ folder: string }>) {
+    ingestFolder = e.detail.folder;
+  }
 
   onMount(async () => {
     if (!cairn) {
@@ -88,7 +95,9 @@
     {/if}
   </section>
 
-  <DropZone />
+  <DropZone on:ingestComplete={handleIngestComplete} />
+
+  <ClassifyPanel {ingestFolder} />
 
   <Settings />
 
