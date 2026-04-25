@@ -802,6 +802,59 @@ function registerIpc() {
 
     return result;
   });
+
+  ipcMain.handle("cairn:soundbites:estimate", async (_event, payload) => {
+    return callPython(
+      { type: "soundbites_estimate", payload: { path: String(payload.path) } },
+      { timeoutMs: 60_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:soundbites", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:soundbites:progress", obj);
+    };
+
+    const keys = readStoredKeys();
+    const enrichedPayload = {
+      ...payload,
+      api_key: keys["ANTHROPIC_API_KEY"] ?? "",
+    };
+
+    let result;
+    try {
+      result = await Promise.race([
+        callPython(
+          { type: "soundbites", payload: enrichedPayload },
+          {
+            timeoutMs: 1_800_000,
+            onProgress: (ev) => sendProgress(ev),
+          },
+        ),
+        new Promise((_res, rej) =>
+          setTimeout(() => rej(new Error("Soundbites timed out (30 min)")), 1_800_000),
+        ),
+      ]);
+    } catch (err) {
+      sendProgress({
+        type: "soundbites_progress",
+        event: "soundbites_error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return { total: 0, processed: 0, skipped: 0, errors: 0, total_bites: 0, total_flagged: 0 };
+    }
+
+    return (
+      result ?? {
+        total: 0,
+        processed: 0,
+        skipped: 0,
+        errors: 0,
+        total_bites: 0,
+        total_flagged: 0,
+      }
+    );
+  });
 }
 
 function createMainWindow() {

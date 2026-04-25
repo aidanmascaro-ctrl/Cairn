@@ -28,6 +28,7 @@ import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
 import sidecar
+import soundbites as soundbites_worker
 import transcribe as transcribe_worker
 import vision as vision_worker
 
@@ -207,6 +208,24 @@ def handle_vision_estimate(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_soundbites_estimate(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return A-roll clip count + estimated Claude cost for soundbite selection.
+    payload: { path: str }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    clips = soundbites_worker.scan_aroll_clips(path)
+    estimate = soundbites_worker.estimate_soundbites(clips)
+
+    return {
+        "id": msg["id"],
+        "type": "soundbites_estimate_result",
+        **estimate,
+    }
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
@@ -214,6 +233,7 @@ HANDLERS: dict[str, Any] = {
     "transcribe_estimate": handle_transcribe_estimate,
     "update_speaker_labels": handle_update_speaker_labels,
     "vision_estimate": handle_vision_estimate,
+    "soundbites_estimate": handle_soundbites_estimate,
     "brief_get": handle_brief_get,
     "brief_message": handle_brief_message,
     "brief_save": handle_brief_save,
@@ -477,11 +497,73 @@ def handle_vision(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield {"id": msg_id, "type": "vision_progress", "resolve_ok": resolve_ok, **event}
 
 
+def handle_soundbites(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """
+    Identify soundbites for all A-roll clips in a shoot folder.
+
+    Expected payload keys:
+      path      -- absolute path to organised shoot folder (required)
+      api_key   -- Anthropic API key (required)
+      dry_run   -- bool, default False (skip Resolve marker writes when True)
+
+    Yields soundbites_progress events per clip, then soundbites_complete.
+    """
+    payload = msg.get("payload", {})
+    msg_id: str = msg["id"]
+
+    path: str = payload["path"]
+    api_key: str = payload.get("api_key", "")
+    dry_run: bool = bool(payload.get("dry_run", False))
+
+    clip_paths = soundbites_worker.scan_aroll_clips(path)
+
+    for event in soundbites_worker.process_all(clip_paths, path, api_key):
+        if event.get("event") == "soundbites_complete":
+            yield {"id": msg_id, "type": "soundbites_complete", **event}
+            return
+
+        if event.get("event") == "error":
+            yield {"id": msg_id, "type": "error", "message": event.get("reason", "Unknown error")}
+            return
+
+        resolve_ok: bool | None = None
+        if not dry_run and event.get("event") == "clip_processed":
+            soundbites_list = event.get("soundbites", [])
+            clip_file = event.get("file", "")
+            if soundbites_list and clip_file:
+                try:
+                    # Clear existing Cairn markers before writing new ones
+                    resolve_api.clear_cairn_markers(clip_file)
+                    all_ok = True
+                    for bite in soundbites_list:
+                        ok = resolve_api.add_clip_marker(
+                            clip_path=clip_file,
+                            frame_id=bite["in_frame"],
+                            color=bite["marker_color"],
+                            name=bite["label"],
+                            note=soundbites_worker.render_marker_note(bite),
+                            duration=max(1, bite["out_frame"] - bite["in_frame"]),
+                            custom_data=f"cairn:{bite['id']}",
+                        )
+                        if not ok:
+                            all_ok = False
+                    resolve_ok = all_ok
+                except Exception as exc:
+                    resolve_ok = False
+                    print(
+                        f"[bridge.py] Resolve marker write failed for {clip_file}: {exc}",
+                        file=sys.stderr,
+                    )
+
+        yield {"id": msg_id, "type": "soundbites_progress", "resolve_ok": resolve_ok, **event}
+
+
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
     "classify": handle_classify,
     "transcribe": handle_transcribe,
     "vision": handle_vision,
+    "soundbites": handle_soundbites,
 }
 
 

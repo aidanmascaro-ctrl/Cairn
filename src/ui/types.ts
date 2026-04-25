@@ -285,6 +285,71 @@ export interface BriefApi {
   reset(payload: { path: string }): Promise<{ ok: boolean }>;
 }
 
+// ── Soundbites types ───────────────────────────────────────────────────────────
+
+export interface SoundbiteEntry {
+  id: string;
+  beat_type: string;
+  in_sec: number;
+  out_sec: number;
+  in_frame: number;
+  out_frame: number;
+  in_tc: string;
+  out_tc: string;
+  label: string;
+  why_usable: string;
+  extract: string;
+  marker_color: string;
+  confidence: number;
+  judge_score?: number;
+  flagged_for_review?: boolean;
+}
+
+export interface SoundbitesEstimateResult {
+  type: "soundbites_estimate_result";
+  clip_count: number;
+  estimated_cost_usd: number;
+}
+
+export interface SoundbitesProgressEvent {
+  event:
+    | "soundbites_started"
+    | "clip_processed"
+    | "clip_skipped"
+    | "clip_error"
+    | "soundbites_complete"
+    | "soundbites_error";
+  file?: string;
+  soundbite_count?: number;
+  flagged_count?: number;
+  soundbites?: SoundbiteEntry[];
+  reason?: string;
+  resolve_ok?: boolean | null;
+  total_clips?: number;
+  // soundbites_complete summary fields
+  total?: number;
+  processed?: number;
+  skipped?: number;
+  errors?: number;
+  total_bites?: number;
+  total_flagged?: number;
+}
+
+export interface SoundbitesResult {
+  total: number;
+  processed: number;
+  skipped: number;
+  errors: number;
+  total_bites: number;
+  total_flagged: number;
+}
+
+export interface SoundbitesApi {
+  estimate(payload: { path: string }): Promise<SoundbitesEstimateResult>;
+  run(payload: { path: string; dry_run?: boolean }): Promise<SoundbitesResult>;
+  onProgress(callback: (event: SoundbitesProgressEvent) => void): () => void;
+}
+
 export interface VisionEstimateResult {
   type: "vision_estimate_result";
   clip_count: number;
@@ -361,6 +426,7 @@ export interface CairnBridge {
   classify: ClassifyApi;
   transcribe: TranscribeApi;
   vision: VisionApi;
+  soundbites: SoundbitesApi;
   brief: BriefApi;
   keys: KeysApi;
 }

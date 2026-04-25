@@ -151,6 +151,29 @@ contextBridge.exposeInMainWorld("cairn", {
     },
   },
 
+  soundbites: {
+    /**
+     * Get A-ROLL clip count + estimated Claude cost for soundbite selection.
+     * @param {{ path: string }} payload
+     */
+    estimate: (payload) => ipcRenderer.invoke("cairn:soundbites:estimate", payload),
+    /**
+     * Identify soundbites in all A-ROLL clips in the shoot folder.
+     * @param {{ path: string, dry_run?: boolean }} payload
+     */
+    run: (payload) => ipcRenderer.invoke("cairn:soundbites", payload),
+    /**
+     * Subscribe to soundbites progress events. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:soundbites:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:soundbites:progress", listener);
+    },
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),

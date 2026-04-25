@@ -405,6 +405,128 @@ def set_keywords(clip_path: str, keywords: str) -> bool:
         _release_lock()
 
 
+# ── Marker helpers ────────────────────────────────────────────────────────────
+
+VALID_MARKER_COLORS: frozenset[str] = frozenset(
+    {
+        "Blue",
+        "Cyan",
+        "Green",
+        "Yellow",
+        "Red",
+        "Pink",
+        "Purple",
+        "Fuchsia",
+        "Rose",
+        "Lavender",
+        "Sky",
+        "Mint",
+        "Lemon",
+        "Sand",
+        "Cocoa",
+        "Cream",
+    }
+)
+
+CAIRN_MARKER_PREFIX = "cairn:"
+
+
+def get_clip_fps(clip_path: str) -> float:
+    """
+    Return the frame rate of a clip as a float.
+    Falls back to 24.0 if Resolve is unavailable or the property is unreadable.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return 24.0
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return 24.0
+        fps_raw = clip.GetClipProperty("FPS")
+        return float(fps_raw) if fps_raw else 24.0
+    except (ResolveUnavailableError, ValueError, TypeError):
+        return 24.0
+    finally:
+        _release_lock()
+
+
+def clear_cairn_markers(clip_path: str) -> int:
+    """
+    Delete all markers whose customData starts with "cairn:" from the clip.
+    Returns the number of markers deleted.
+    Safe to call on clips with no markers.
+    """
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return 0
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return 0
+        markers: dict = clip.GetMarkers() or {}
+        deleted = 0
+        for frame_id, info in markers.items():
+            if str(info.get("customData", "")).startswith(CAIRN_MARKER_PREFIX):
+                clip.DeleteMarkerAtFrame(int(frame_id))
+                deleted += 1
+        return deleted
+    except ResolveUnavailableError:
+        return 0
+    finally:
+        _release_lock()
+
+
+def add_clip_marker(
+    clip_path: str,
+    frame_id: int,
+    color: str,
+    name: str,
+    note: str,
+    duration: int,
+    custom_data: str,
+) -> bool:
+    """
+    Add a single marker to a MediaPoolItem. The lock is held for the full call.
+    Returns True on success, False if Resolve is unavailable or clip not found.
+    `color` must be in VALID_MARKER_COLORS; falls back to "Lemon" and logs if not.
+    """
+    if color not in VALID_MARKER_COLORS:
+        import sys
+
+        print(
+            f"[resolve_api] Unknown marker color {color!r}, falling back to Lemon",
+            file=sys.stderr,
+        )
+        color = "Lemon"
+
+    _acquire_lock()
+    try:
+        resolve = get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject()
+        if project is None:
+            return False
+        mp = project.GetMediaPool()
+        clip = get_clip_by_path(mp, clip_path)
+        if clip is None:
+            return False
+        result = clip.AddMarker(frame_id, color, name, note, duration, custom_data)
+        return bool(result)
+    except ResolveUnavailableError:
+        return False
+    finally:
+        _release_lock()
+
+
 def add_subtitle_track(clip_path: str, srt_path: str) -> bool:
     """
     Attach an SRT subtitle file to the Resolve clip at clip_path.
