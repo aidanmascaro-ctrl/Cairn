@@ -350,6 +350,8 @@ export interface SoundbiteEntry {
   confidence: number;
   judge_score?: number;
   flagged_for_review?: boolean;
+  matches?: Array<{ clip_id: string; kind: string; confidence: number }>;
+  user_state?: { used?: boolean };
 }
 
 export interface SoundbitesEstimateResult {
@@ -464,6 +466,60 @@ export interface VisionApi {
   onProgress(callback: (event: VisionProgressEvent) => void): () => void;
 }
 
+// ── Sidebar / cockpit types ────────────────────────────────────────────────────
+
+export interface SidecarBrollMatch {
+  soundbite_id: string;
+  kind: string;
+  confidence: number;
+  judge_score?: number;
+  rationale?: string;
+}
+
+export interface SidecarRecord {
+  clip_id: string;
+  source_path?: string;
+  classification?: "A-ROLL" | "B-ROLL" | "AMBIGUOUS";
+  stages_complete?: string[];
+  fps?: number;
+  speaker_labels?: Record<string, string>;
+  soundbites?: SoundbiteEntry[];
+  vision?: { tags: VisionTags };
+  matches?: SidecarBrollMatch[];
+}
+
+export interface SidebarLoadResult {
+  folder: string;
+  sidecars: SidecarRecord[];
+  brief: BriefDraft | null;
+}
+
+export interface ResolveJumpResult {
+  ok: boolean;
+  reason?: string;
+}
+
+export interface SidebarApi {
+  load(payload: { path: string }): Promise<SidebarLoadResult>;
+  watch(payload: { path: string }): Promise<void>;
+  unwatch(payload: { path: string }): Promise<void>;
+  onSidecarChange(callback: (payload: { path: string }) => void): () => void;
+  markUsed(payload: {
+    path: string;
+    soundbite_id: string;
+    used: boolean;
+  }): Promise<{ ok: boolean; reason?: string }>;
+  rejectMatch(payload: {
+    path: string;
+    broll_clip_id: string;
+    soundbite_id: string;
+  }): Promise<{ ok: boolean; reason?: string }>;
+}
+
+export interface ResolveExtApi {
+  jump(payload: { in_tc: string }): Promise<ResolveJumpResult>;
+}
+
 export interface CairnBridge {
   openFolder(): Promise<string | null>;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
@@ -477,4 +533,6 @@ export interface CairnBridge {
   soundbites: SoundbitesApi;
   brief: BriefApi;
   keys: KeysApi;
+  sidebar: SidebarApi;
+  resolveExt: ResolveExtApi;
 }

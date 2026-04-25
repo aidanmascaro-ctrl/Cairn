@@ -211,4 +211,53 @@ contextBridge.exposeInMainWorld("cairn", {
      */
     validate: (params) => ipcRenderer.invoke("cairn:keys:validate", params),
   },
+
+  sidebar: {
+    /**
+     * Read all sidecars from <path>/04_EXPORT/.cairn/.
+     * Returns { folder, sidecars, brief }.
+     * @param {{ path: string }} payload
+     */
+    load: (payload) => ipcRenderer.invoke("cairn:sidebar:load", payload),
+    /**
+     * Start a file watcher on <path>/04_EXPORT/.cairn/.
+     * Fires cairn:sidebar:change events when sidecars change.
+     * @param {{ path: string }} payload
+     */
+    watch: (payload) => ipcRenderer.invoke("cairn:sidebar:watch", payload),
+    /**
+     * Stop the file watcher for the given path.
+     * @param {{ path: string }} payload
+     */
+    unwatch: (payload) => ipcRenderer.invoke("cairn:sidebar:unwatch", payload),
+    /**
+     * Subscribe to sidecar-changed notifications. Returns unsubscribe fn.
+     * @param {(payload: { path: string }) => void} callback
+     * @returns {() => void}
+     */
+    onSidecarChange: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:sidebar:change", listener);
+      return () => ipcRenderer.removeListener("cairn:sidebar:change", listener);
+    },
+    /**
+     * Write user_state.used to the soundbite's A-roll sidecar.
+     * @param {{ path: string, soundbite_id: string, used: boolean }} payload
+     */
+    markUsed: (payload) => ipcRenderer.invoke("cairn:sidebar:mark-used", payload),
+    /**
+     * Flag a B-roll match as user-rejected in the B-roll sidecar.
+     * @param {{ path: string, broll_clip_id: string, soundbite_id: string }} payload
+     */
+    rejectMatch: (payload) => ipcRenderer.invoke("cairn:sidebar:reject-match", payload),
+  },
+
+  resolveExt: {
+    /**
+     * Jump the Resolve timeline playhead to the given source timecode.
+     * Best-effort: works when the clip is on the current timeline.
+     * @param {{ in_tc: string }} payload
+     */
+    jump: (payload) => ipcRenderer.invoke("cairn:resolve:jump", payload),
+  },
 });

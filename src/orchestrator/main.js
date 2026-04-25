@@ -917,6 +917,152 @@ function registerIpc() {
       }
     );
   });
+
+  // ── Sidebar / cockpit IPC ──────────────────────────────────────────────────
+
+  /** @type {Map<string, import('chokidar').FSWatcher>} */
+  const sidecarWatchers = new Map();
+
+  /**
+   * Read all sidecar JSON files from <shootFolder>/04_EXPORT/.cairn/.
+   * Returns { folder, sidecars: object[], brief: object|null }.
+   */
+  ipcMain.handle("cairn:sidebar:load", (_event, { path: shootFolder }) => {
+    const cairnRoot = path.join(shootFolder, "04_EXPORT", ".cairn");
+    if (!fs.existsSync(cairnRoot)) return { folder: shootFolder, sidecars: [], brief: null };
+    const sidecars = [];
+    let brief = null;
+    let entries;
+    try {
+      entries = fs.readdirSync(cairnRoot);
+    } catch {
+      return { folder: shootFolder, sidecars: [], brief: null };
+    }
+    for (const file of entries) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(cairnRoot, file), "utf8"));
+        if (file === "brief.json") brief = data;
+        else sidecars.push(data);
+      } catch {
+        /* skip corrupt file */
+      }
+    }
+    return { folder: shootFolder, sidecars, brief };
+  });
+
+  /**
+   * Start a chokidar watcher on the .cairn/ dir.
+   * Fires cairn:sidebar:change on the sender when any sidecar changes.
+   */
+  ipcMain.handle("cairn:sidebar:watch", (event, { path: shootFolder }) => {
+    if (sidecarWatchers.has(shootFolder)) return;
+    const cairnRoot = path.join(shootFolder, "04_EXPORT", ".cairn");
+    const chokidar = require("chokidar");
+    const watcher = chokidar.watch(cairnRoot, {
+      persistent: false,
+      ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 50 },
+    });
+    watcher.on("all", () => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("cairn:sidebar:change", { path: shootFolder });
+      }
+    });
+    sidecarWatchers.set(shootFolder, watcher);
+  });
+
+  ipcMain.handle("cairn:sidebar:unwatch", async (_event, { path: shootFolder }) => {
+    const watcher = sidecarWatchers.get(shootFolder);
+    if (watcher) {
+      await watcher.close();
+      sidecarWatchers.delete(shootFolder);
+    }
+  });
+
+  /**
+   * Jump Resolve timeline playhead to the given source timecode (best-effort).
+   * Uses timeline.SetCurrentTimecode — works when the clip is on the current timeline.
+   */
+  ipcMain.handle("cairn:resolve:jump", async (_event, { in_tc }) => {
+    try {
+      const resolveObj = await getResolve();
+      if (!resolveObj) return { ok: false, reason: "Resolve not available" };
+      const pm = await resolveObj.GetProjectManager();
+      const project = pm ? await pm.GetCurrentProject() : null;
+      const timeline = project ? await project.GetCurrentTimeline() : null;
+      if (!timeline) return { ok: false, reason: "No timeline open in Resolve" };
+      await timeline.SetCurrentTimecode(in_tc);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  /**
+   * Write user_state.used to the soundbite's A-roll sidecar.
+   * Finds the sidecar by scanning .cairn/ for the soundbite_id.
+   */
+  ipcMain.handle("cairn:sidebar:mark-used", (_event, { path: shootFolder, soundbite_id, used }) => {
+    const cairnRoot = path.join(shootFolder, "04_EXPORT", ".cairn");
+    if (!fs.existsSync(cairnRoot)) return { ok: false, reason: "No .cairn directory" };
+    let entries;
+    try {
+      entries = fs.readdirSync(cairnRoot);
+    } catch {
+      return { ok: false, reason: "Cannot read .cairn directory" };
+    }
+    for (const file of entries) {
+      if (file === "brief.json" || !file.endsWith(".json")) continue;
+      const full = path.join(cairnRoot, file);
+      try {
+        const sc = JSON.parse(fs.readFileSync(full, "utf8"));
+        if (sc.classification !== "A-ROLL" || !Array.isArray(sc.soundbites)) continue;
+        const bite = sc.soundbites.find((b) => b.id === soundbite_id);
+        if (!bite) continue;
+        bite.user_state = { ...(bite.user_state ?? {}), used };
+        fs.writeFileSync(full, JSON.stringify(sc, null, 2), "utf8");
+        return { ok: true };
+      } catch {
+        /* skip */
+      }
+    }
+    return { ok: false, reason: "Soundbite not found" };
+  });
+
+  /**
+   * Mark a B-roll match as user-rejected in the B-roll sidecar.
+   */
+  ipcMain.handle(
+    "cairn:sidebar:reject-match",
+    (_event, { path: shootFolder, broll_clip_id, soundbite_id }) => {
+      const cairnRoot = path.join(shootFolder, "04_EXPORT", ".cairn");
+      if (!fs.existsSync(cairnRoot)) return { ok: false, reason: "No .cairn directory" };
+      let entries;
+      try {
+        entries = fs.readdirSync(cairnRoot);
+      } catch {
+        return { ok: false, reason: "Cannot read .cairn directory" };
+      }
+      for (const file of entries) {
+        if (file === "brief.json" || !file.endsWith(".json")) continue;
+        const full = path.join(cairnRoot, file);
+        try {
+          const sc = JSON.parse(fs.readFileSync(full, "utf8"));
+          if (sc.classification !== "B-ROLL" || sc.clip_id !== broll_clip_id) continue;
+          if (!Array.isArray(sc.matches)) continue;
+          const match = sc.matches.find((m) => m.soundbite_id === soundbite_id);
+          if (!match) continue;
+          match.user_rejected = true;
+          fs.writeFileSync(full, JSON.stringify(sc, null, 2), "utf8");
+          return { ok: true };
+        } catch {
+          /* skip */
+        }
+      }
+      return { ok: false, reason: "Match not found" };
+    },
+  );
 }
 
 function createMainWindow() {
