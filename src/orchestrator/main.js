@@ -642,6 +642,40 @@ function registerIpc() {
     return result ?? { total: 0, transcribed: 0, skipped: 0, errors: 0 };
   });
 
+  ipcMain.handle("cairn:brief:get", async (_event, payload) => {
+    return callPython(
+      { type: "brief_get", payload: { path: String(payload.path) } },
+      { timeoutMs: 10_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:brief:message", async (_event, payload) => {
+    const keys = readStoredKeys();
+    const enrichedPayload = {
+      path: String(payload.path),
+      message: String(payload.message),
+      api_key: keys["ANTHROPIC_API_KEY"] ?? "",
+    };
+    return callPython({ type: "brief_message", payload: enrichedPayload }, { timeoutMs: 120_000 });
+  });
+
+  ipcMain.handle("cairn:brief:save", async (_event, payload) => {
+    return callPython(
+      {
+        type: "brief_save",
+        payload: { path: String(payload.path), updates: payload.updates ?? {} },
+      },
+      { timeoutMs: 10_000 },
+    );
+  });
+
+  ipcMain.handle("cairn:brief:reset", async (_event, payload) => {
+    return callPython(
+      { type: "brief_reset", payload: { path: String(payload.path) } },
+      { timeoutMs: 10_000 },
+    );
+  });
+
   ipcMain.handle("cairn:vision:estimate", async (_event, payload) => {
     return callPython(
       { type: "vision_estimate", payload: { path: String(payload.path) } },

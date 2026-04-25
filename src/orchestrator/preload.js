@@ -111,6 +111,23 @@ contextBridge.exposeInMainWorld("cairn", {
     labelSpeakers: (payload) => ipcRenderer.invoke("cairn:transcribe:label-speakers", payload),
   },
 
+  brief: {
+    /** Read the current brief.json for a shoot folder (null if none). */
+    get: (payload) => ipcRenderer.invoke("cairn:brief:get", payload),
+    /**
+     * Send a user chat message; returns { reply, draft, finalised, fields, judge }.
+     * @param {{ path: string, message: string }} payload
+     */
+    message: (payload) => ipcRenderer.invoke("cairn:brief:message", payload),
+    /**
+     * Save edited brief fields from the UI form.
+     * @param {{ path: string, updates: object }} payload
+     */
+    save: (payload) => ipcRenderer.invoke("cairn:brief:save", payload),
+    /** Delete brief.json and start over. */
+    reset: (payload) => ipcRenderer.invoke("cairn:brief:reset", payload),
+  },
+
   vision: {
     /**
      * Get B-ROLL clip count + estimated Claude vision cost for a shoot folder.

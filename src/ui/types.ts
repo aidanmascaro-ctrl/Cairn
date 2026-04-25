@@ -213,6 +213,78 @@ export interface TranscribeApi {
   labelSpeakers(payload: SpeakerLabelPayload): Promise<SpeakerLabelResult>;
 }
 
+// ── Brief types ────────────────────────────────────────────────────────────────
+
+export interface BriefSubject {
+  name?: string;
+  profession?: string;
+  location?: string;
+  one_liner?: string;
+}
+
+export interface BriefDeliverable {
+  platform: string;
+  target_duration_sec?: number[];
+  aspect_ratio?: string;
+  tone?: string;
+}
+
+export interface BriefPrivacy {
+  cloud_transcription_allowed: boolean;
+  cloud_vision_allowed: boolean;
+}
+
+export interface BriefDraft {
+  schema_version?: number;
+  subject?: BriefSubject;
+  deliverables?: BriefDeliverable[];
+  narrative_angle?: string;
+  tone?: string;
+  themes?: string[];
+  word_boost_terms?: string[];
+  privacy?: BriefPrivacy;
+  notes?: string;
+  conversation_log?: Array<{ role: "user" | "assistant"; content: string }>;
+  finalised?: boolean;
+}
+
+export interface BriefFields {
+  filled: number;
+  total: number;
+  required_filled: number;
+  required_total: number;
+}
+
+export interface BriefJudgeResult {
+  overall_score: number;
+  invented_fields: string[];
+  missing_fields: string[];
+  notes?: string;
+}
+
+export interface BriefMessageResult {
+  reply: string;
+  draft: BriefDraft;
+  finalised: boolean;
+  fields: BriefFields;
+  judge?: BriefJudgeResult | null;
+}
+
+export interface BriefGetResult {
+  brief: BriefDraft | null;
+  fields: BriefFields;
+}
+
+export interface BriefApi {
+  get(payload: { path: string }): Promise<BriefGetResult>;
+  message(payload: { path: string; message: string }): Promise<BriefMessageResult>;
+  save(payload: { path: string; updates: Partial<BriefDraft> }): Promise<{
+    brief: BriefDraft;
+    fields: BriefFields;
+  }>;
+  reset(payload: { path: string }): Promise<{ ok: boolean }>;
+}
+
 export interface VisionEstimateResult {
   type: "vision_estimate_result";
   clip_count: number;
@@ -289,5 +361,6 @@ export interface CairnBridge {
   classify: ClassifyApi;
   transcribe: TranscribeApi;
   vision: VisionApi;
+  brief: BriefApi;
   keys: KeysApi;
 }

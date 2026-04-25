@@ -23,6 +23,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
+import brief as brief_worker
 import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
@@ -126,6 +127,68 @@ def handle_update_speaker_labels(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_brief_get(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Read the existing brief.json for a shoot folder.
+    payload: { path: str }
+    Returns: { brief: dict | null, fields: dict }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    data = brief_worker.read_brief(path)
+    fields = (
+        brief_worker.count_fields(data)
+        if data is not None
+        else {"filled": 0, "total": 8, "required_filled": 0, "required_total": 5}
+    )
+
+    return {"id": msg["id"], "type": "brief_get_result", "brief": data, "fields": fields}
+
+
+def handle_brief_message(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Send a user message to Claude and get back the assistant reply + updated draft.
+    payload: { path: str, message: str, api_key: str }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+    message: str = payload["message"]
+    api_key: str = payload.get("api_key", "")
+
+    result = brief_worker.send_message(path, message, api_key)
+
+    return {"id": msg["id"], "type": "brief_message_result", **result}
+
+
+def handle_brief_save(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Persist manual edits from the UI form into brief.json.
+    payload: { path: str, updates: dict }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+    updates: dict[str, Any] = payload.get("updates", {})
+
+    updated = brief_worker.save_brief(path, updates)
+    fields = brief_worker.count_fields(updated)
+
+    return {"id": msg["id"], "type": "brief_save_result", "brief": updated, "fields": fields}
+
+
+def handle_brief_reset(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Delete brief.json for a shoot folder (start over).
+    payload: { path: str }
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+
+    brief_worker.delete_brief(path)
+
+    return {"id": msg["id"], "type": "brief_reset_result", "ok": True}
+
+
 def handle_vision_estimate(msg: dict[str, Any]) -> dict[str, Any]:
     """
     Return B-ROLL clip count + estimated Claude vision cost for the shoot folder.
@@ -151,6 +214,10 @@ HANDLERS: dict[str, Any] = {
     "transcribe_estimate": handle_transcribe_estimate,
     "update_speaker_labels": handle_update_speaker_labels,
     "vision_estimate": handle_vision_estimate,
+    "brief_get": handle_brief_get,
+    "brief_message": handle_brief_message,
+    "brief_save": handle_brief_save,
+    "brief_reset": handle_brief_reset,
 }
 
 
