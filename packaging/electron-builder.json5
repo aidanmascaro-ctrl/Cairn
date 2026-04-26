@@ -1,0 +1,77 @@
+/**
+ * electron-builder config — Windows NSIS installer only.
+ *
+ * Mac packaging is handled by packaging/build-mac.sh (codesign + DMG + notarize)
+ * because the plugin is not a standalone Electron app and electron-builder's
+ * app-bundle model does not map cleanly to a Resolve Workflow Integration plugin.
+ *
+ * Required env vars for Windows signing (set in CI or locally):
+ *   WIN_CERT_PATH       — path to the .pfx code-signing certificate
+ *   WIN_CERT_PASSWORD   — password for the .pfx
+ *
+ * Build:
+ *   npm run package:win      (Windows only — runs electron-builder)
+ */
+{
+  appId: "com.aidanmascaro.cairn",
+  productName: "Cairn",
+  copyright: "Copyright © 2026 Aidan Mascaro",
+
+  // Include only plugin files — no bundled Electron runtime.
+  // WorkflowIntegration.node is Resolve's own native addon; it must already
+  // be present in src/orchestrator/ (copied by install-dev-plugin.sh).
+  files: [
+    "manifest.xml",
+    "package.json",
+    "src/orchestrator/main.js",
+    "src/orchestrator/preload.js",
+    "src/orchestrator/WorkflowIntegration.node",
+    "dist/**/*",
+    "node_modules/chokidar/**/*",
+    "node_modules/zod/**/*",
+    "!**/__pycache__/**",
+    "!**/*.py",
+    "!**/*.pyc",
+  ],
+
+  // PyInstaller workers binary — built separately by `npm run package:python`.
+  extraResources: [
+    {
+      from: "packaging/dist/workers.exe",
+      to: "workers.exe",
+      filter: ["**/*"],
+    },
+  ],
+
+  asar: false,
+
+  directories: {
+    output: "packaging/release/win",
+    buildResources: "assets",
+  },
+
+  win: {
+    target: [
+      {
+        target: "nsis",
+        arch: ["x64"],
+      },
+    ],
+    signingHashAlgorithms: ["sha256"],
+    // certificateFile + certificatePassword read from env by electron-builder
+    certificateFile: "${env.WIN_CERT_PATH}",
+    certificatePassword: "${env.WIN_CERT_PASSWORD}",
+  },
+
+  nsis: {
+    oneClick: false,
+    perMachine: true,
+    allowDirChange: false,
+    createDesktopShortcut: false,
+    createStartMenuShortcut: false,
+    // Custom macro overrides $INSTDIR to Resolve's plugin folder.
+    include: "packaging/installer.nsh",
+    // Disable the default electron-builder uninstaller shortcut (plugin, not app)
+    deleteAppDataOnUninstall: false,
+  },
+}

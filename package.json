@@ -1,6 +1,6 @@
 {
   "name": "cairn",
-  "version": "0.0.1",
+  "version": "1.0.0-rc1",
   "description": "DaVinci Resolve Workflow Integration Plugin — identifies, doesn't assemble.",
   "type": "commonjs",
   "main": "src/orchestrator/main.js",
@@ -14,7 +14,11 @@
     "lint": "eslint . && prettier --check .",
     "test": "vitest run",
     "install-plugin": "bash packaging/install-dev-plugin.sh",
-    "prepare": "husky"
+    "prepare": "husky",
+    "package:python": "pyinstaller packaging/workers.spec --distpath packaging/dist --workpath packaging/build/pyinstaller --noconfirm",
+    "package:mac": "npm run build:ui && bash packaging/build-mac.sh",
+    "package:win": "npm run build:ui && electron-builder --config packaging/electron-builder.json5 --win",
+    "package": "npm run build:ui && npm run package:python && bash packaging/build-mac.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -22,6 +26,7 @@
     "@tsconfig/svelte": "^5.0.4",
     "@types/node": "^20.12.12",
     "electron": "^30.0.6",
+    "electron-builder": "^25.1.8",
     "eslint": "^10.2.1",
     "eslint-plugin-svelte": "^3.17.1",
     "husky": "^9.1.7",

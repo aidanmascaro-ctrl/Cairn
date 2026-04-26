@@ -3,7 +3,7 @@
     <Plugin>
         <Id>com.aidanmascaro.cairn</Id>
         <Name>Cairn</Name>
-        <Version>0.0.1</Version>
+        <Version>1.0.0-rc1</Version>
         <Description>Pre-edit automation for DaVinci Resolve — organises, classifies, transcribes, tags, and matches. Leaves markers, not cuts.</Description>
         <FilePath>src/orchestrator/main.js</FilePath>
     </Plugin>

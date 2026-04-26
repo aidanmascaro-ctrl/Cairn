@@ -52,6 +52,28 @@ function getPythonPath() {
   return "python3";
 }
 
+/**
+ * Returns the path to the PyInstaller-bundled workers binary, or null if not
+ * present (dev mode — fall back to getPythonPath() + getBridgeScriptPath()).
+ *
+ * Production layout inside the plugin folder:
+ *   resources/workers          macOS
+ *   resources/workers.exe      Windows
+ *
+ * Dev convenience: if `npm run package:python` was run, the binary lands at
+ *   packaging/dist/workers[.exe] relative to the project root.
+ */
+function getWorkersPath() {
+  const ext = process.platform === "win32" ? ".exe" : "";
+  // Production: <plugin>/resources/workers[.exe]
+  const prod = path.join(__dirname, "..", "..", "resources", `workers${ext}`);
+  if (fs.existsSync(prod)) return prod;
+  // Dev build: <project>/packaging/dist/workers[.exe]
+  const dev = path.join(__dirname, "..", "..", "packaging", "dist", `workers${ext}`);
+  if (fs.existsSync(dev)) return dev;
+  return null;
+}
+
 function getFfmpegPath() {
   const bundled = path.join(__dirname, "..", "..", "assets", "bin", "ffmpeg");
   if (fs.existsSync(bundled)) return bundled;
@@ -66,7 +88,13 @@ function getBridgeScriptPath() {
 function ensurePythonWorker() {
   if (pythonWorker && pythonWorker.exitCode === null) return;
 
-  pythonWorker = spawn(getPythonPath(), [getBridgeScriptPath()], {
+  // Prefer the bundled PyInstaller binary (no Python runtime required).
+  // Falls back to the Python script for dev mode.
+  const workersExe = getWorkersPath();
+  const cmd = workersExe ?? getPythonPath();
+  const args = workersExe ? [] : [getBridgeScriptPath()];
+
+  pythonWorker = spawn(cmd, args, {
     stdio: ["pipe", "pipe", "pipe"],
   });
 

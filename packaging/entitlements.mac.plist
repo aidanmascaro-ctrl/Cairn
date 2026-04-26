@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Hardened-runtime entitlements for the Cairn PyInstaller workers binary.
+
+        allow-unsigned-executable-memory:
+            Python's bytecode interpreter and ONNX Runtime's JIT both write
+            executable pages.  Without this, the hardened runtime kills the
+            process on first import.
+
+        disable-library-validation:
+            PyInstaller bundles third-party .dylibs (ctranslate2, onnxruntime,
+            etc.) that are not signed by the same team ID as our binary.
+            Gatekeeper would reject their load without this entitlement.
+
+        allow-dyld-environment-variables:
+            Needed so faster-whisper / ctranslate2 can set DYLD_LIBRARY_PATH
+            to resolve their bundled shared libraries at startup.
+
+        network.client:
+            Required for outbound HTTPS to AssemblyAI and Anthropic APIs.
+    -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>

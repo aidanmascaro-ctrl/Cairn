@@ -36,6 +36,10 @@ venv/
 # Packaging artefacts (signed installers are built, not committed)
 packaging/out/
 packaging/cert/
+packaging/dist/
+packaging/build/
+packaging/stage/
+packaging/release/
 *.dmg
 *.exe
 *.pkg
