@@ -18,7 +18,8 @@
     "package:python": "pyinstaller packaging/workers.spec --distpath packaging/dist --workpath packaging/build/pyinstaller --noconfirm",
     "package:mac": "npm run build:ui && bash packaging/build-mac.sh",
     "package:win": "npm run build:ui && electron-builder --config packaging/electron-builder.json5 --win",
-    "package": "npm run build:ui && npm run package:python && bash packaging/build-mac.sh"
+    "package": "npm run build:ui && npm run package:python && bash packaging/build-mac.sh",
+    "train": "node tools/trainer.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -46,13 +46,27 @@ _VIDEO_EXTS: set[str] = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
 # ── Binary paths ──────────────────────────────────────────────────────────────
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-FFMPEG_PATH: Path = _PROJECT_ROOT / "assets" / "bin" / "ffmpeg"
-if not FFMPEG_PATH.exists():
-    FFMPEG_PATH = Path("ffmpeg")
 
-FFPROBE_PATH: Path = _PROJECT_ROOT / "assets" / "bin" / "ffprobe"
-if not FFPROBE_PATH.exists():
-    FFPROBE_PATH = Path("ffprobe")
+
+def _find_bin(name: str) -> Path:
+    """Locate ffmpeg/ffprobe: bundled binary → Homebrew → system PATH."""
+    candidates = [
+        _PROJECT_ROOT / "assets" / "bin" / name,
+        Path(f"/opt/homebrew/bin/{name}"),
+        Path(f"/usr/local/bin/{name}"),
+        Path(name),
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                return p
+        except OSError:
+            pass
+    return Path(name)
+
+
+FFMPEG_PATH: Path = _find_bin("ffmpeg")
+FFPROBE_PATH: Path = _find_bin("ffprobe")
 
 # ── OpenCV face cascade (lazy, module-level cache) ────────────────────────────
 
