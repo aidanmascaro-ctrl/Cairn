@@ -1,20 +1,20 @@
 """
 Stage 2 — Classify worker.
 
-Two-signal classifier: clip duration + face detection.
+KNN classifier trained on labeled examples from ~/.cairn/ground_truth.json.
+Two features per clip:
 
-  1. Duration  (ffprobe, instant)
-       < 60 s  → short clip  (B-roll territory)
-       > 120 s → long clip   (A-roll territory)
-
-  2. Face detection  (OpenCV Haar cascade, local, no cloud)
+  1. Face detection  (OpenCV Haar cascade, local, no cloud)
        Samples 5 frames spread across the clip.
        face_ratio = frames_with_face / frames_sampled
 
+  2. Motion score  (mean normalised frame-to-frame absolute pixel diff)
+       0 = completely static, 1 = chaotic movement
+
 Decision:
-  short + no face  → B-ROLL   (auto)
-  long  + face     → A-ROLL   (auto)
-  everything else  → AMBIGUOUS (user review: one-tap confirm)
+  KNN lookup (k=5) → confident vote (>=70%)  → A-ROLL / B-ROLL
+  KNN low confidence / no training data       → AMBIGUOUS (user review)
+  Fallback when <5 examples: face>=threshold  → A-ROLL, else B-ROLL
 
 Audio is intentionally NOT used.  The user keeps a live mic on the
 interview subject while shooting B-roll, making any speech signal
