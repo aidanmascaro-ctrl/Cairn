@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld("cairn", {
 
   classify: {
     /**
-     * Run VAD classification on all video clips in a shoot folder.
+     * Run classification on all video clips in a shoot folder.
      * @param {{ path: string, dry_run?: boolean }} payload
      */
     run: (payload) => ipcRenderer.invoke("cairn:classify", payload),
@@ -83,120 +83,6 @@ contextBridge.exposeInMainWorld("cairn", {
     confirm: (payload) => ipcRenderer.invoke("cairn:classify:confirm", payload),
   },
 
-  transcribe: {
-    /**
-     * Get clip count + estimated audio minutes for cost preview.
-     * @param {{ path: string }} payload
-     */
-    estimate: (payload) => ipcRenderer.invoke("cairn:transcribe:estimate", payload),
-    /**
-     * Run transcription pipeline on all A-ROLL clips in the shoot folder.
-     * @param {{ path: string, cloud_allowed?: boolean, dry_run?: boolean }} payload
-     */
-    run: (payload) => ipcRenderer.invoke("cairn:transcribe", payload),
-    /**
-     * Subscribe to transcribe progress events. Returns an unsubscribe function.
-     * @param {(event: object) => void} callback
-     * @returns {() => void}
-     */
-    onProgress: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on("cairn:transcribe:progress", listener);
-      return () => ipcRenderer.removeListener("cairn:transcribe:progress", listener);
-    },
-    /**
-     * Save user-assigned speaker names to all transcribed clip sidecars.
-     * @param {{ shoot_folder: string, speaker_labels: Record<string, string> }} payload
-     */
-    labelSpeakers: (payload) => ipcRenderer.invoke("cairn:transcribe:label-speakers", payload),
-  },
-
-  brief: {
-    /** Read the current brief.json for a shoot folder (null if none). */
-    get: (payload) => ipcRenderer.invoke("cairn:brief:get", payload),
-    /**
-     * Send a user chat message; returns { reply, draft, finalised, fields, judge }.
-     * @param {{ path: string, message: string }} payload
-     */
-    message: (payload) => ipcRenderer.invoke("cairn:brief:message", payload),
-    /**
-     * Save edited brief fields from the UI form.
-     * @param {{ path: string, updates: object }} payload
-     */
-    save: (payload) => ipcRenderer.invoke("cairn:brief:save", payload),
-    /** Delete brief.json and start over. */
-    reset: (payload) => ipcRenderer.invoke("cairn:brief:reset", payload),
-  },
-
-  vision: {
-    /**
-     * Get B-ROLL clip count + estimated Claude vision cost for a shoot folder.
-     * @param {{ path: string }} payload
-     */
-    estimate: (payload) => ipcRenderer.invoke("cairn:vision:estimate", payload),
-    /**
-     * Run Claude vision tagging on all B-ROLL clips in the shoot folder.
-     * @param {{ path: string, cloud_allowed?: boolean, dry_run?: boolean }} payload
-     */
-    run: (payload) => ipcRenderer.invoke("cairn:vision", payload),
-    /**
-     * Subscribe to vision progress events. Returns an unsubscribe function.
-     * @param {(event: object) => void} callback
-     * @returns {() => void}
-     */
-    onProgress: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on("cairn:vision:progress", listener);
-      return () => ipcRenderer.removeListener("cairn:vision:progress", listener);
-    },
-  },
-
-  matching: {
-    /**
-     * Get soundbite + B-roll counts + estimated cost for matching.
-     * @param {{ path: string }} payload
-     */
-    estimate: (payload) => ipcRenderer.invoke("cairn:matching:estimate", payload),
-    /**
-     * Run B-roll matching for all soundbites in the shoot folder.
-     * @param {{ path: string, dry_run?: boolean }} payload
-     */
-    run: (payload) => ipcRenderer.invoke("cairn:matching", payload),
-    /**
-     * Subscribe to matching progress events. Returns an unsubscribe function.
-     * @param {(event: object) => void} callback
-     * @returns {() => void}
-     */
-    onProgress: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on("cairn:matching:progress", listener);
-      return () => ipcRenderer.removeListener("cairn:matching:progress", listener);
-    },
-  },
-
-  soundbites: {
-    /**
-     * Get A-ROLL clip count + estimated Claude cost for soundbite selection.
-     * @param {{ path: string }} payload
-     */
-    estimate: (payload) => ipcRenderer.invoke("cairn:soundbites:estimate", payload),
-    /**
-     * Identify soundbites in all A-ROLL clips in the shoot folder.
-     * @param {{ path: string, dry_run?: boolean }} payload
-     */
-    run: (payload) => ipcRenderer.invoke("cairn:soundbites", payload),
-    /**
-     * Subscribe to soundbites progress events. Returns an unsubscribe function.
-     * @param {(event: object) => void} callback
-     * @returns {() => void}
-     */
-    onProgress: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on("cairn:soundbites:progress", listener);
-      return () => ipcRenderer.removeListener("cairn:soundbites:progress", listener);
-    },
-  },
-
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),
@@ -210,54 +96,5 @@ contextBridge.exposeInMainWorld("cairn", {
      * @param {{ type: "anthropic"|"assemblyai", key: string }} params
      */
     validate: (params) => ipcRenderer.invoke("cairn:keys:validate", params),
-  },
-
-  sidebar: {
-    /**
-     * Read all sidecars from <path>/04_EXPORT/.cairn/.
-     * Returns { folder, sidecars, brief }.
-     * @param {{ path: string }} payload
-     */
-    load: (payload) => ipcRenderer.invoke("cairn:sidebar:load", payload),
-    /**
-     * Start a file watcher on <path>/04_EXPORT/.cairn/.
-     * Fires cairn:sidebar:change events when sidecars change.
-     * @param {{ path: string }} payload
-     */
-    watch: (payload) => ipcRenderer.invoke("cairn:sidebar:watch", payload),
-    /**
-     * Stop the file watcher for the given path.
-     * @param {{ path: string }} payload
-     */
-    unwatch: (payload) => ipcRenderer.invoke("cairn:sidebar:unwatch", payload),
-    /**
-     * Subscribe to sidecar-changed notifications. Returns unsubscribe fn.
-     * @param {(payload: { path: string }) => void} callback
-     * @returns {() => void}
-     */
-    onSidecarChange: (callback) => {
-      const listener = (_event, data) => callback(data);
-      ipcRenderer.on("cairn:sidebar:change", listener);
-      return () => ipcRenderer.removeListener("cairn:sidebar:change", listener);
-    },
-    /**
-     * Write user_state.used to the soundbite's A-roll sidecar.
-     * @param {{ path: string, soundbite_id: string, used: boolean }} payload
-     */
-    markUsed: (payload) => ipcRenderer.invoke("cairn:sidebar:mark-used", payload),
-    /**
-     * Flag a B-roll match as user-rejected in the B-roll sidecar.
-     * @param {{ path: string, broll_clip_id: string, soundbite_id: string }} payload
-     */
-    rejectMatch: (payload) => ipcRenderer.invoke("cairn:sidebar:reject-match", payload),
-  },
-
-  resolveExt: {
-    /**
-     * Jump the Resolve timeline playhead to the given source timecode.
-     * Best-effort: works when the clip is on the current timeline.
-     * @param {{ in_tc: string }} payload
-     */
-    jump: (payload) => ipcRenderer.invoke("cairn:resolve:jump", payload),
   },
 });

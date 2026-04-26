@@ -1,14 +1,31 @@
 """
-Stage 2 -- Classify worker.
+Stage 2 — Classify worker.
 
-Uses Silero VAD to label every video clip as A-ROLL, B-ROLL, or AMBIGUOUS.
-Writes results to sidecar JSON before any Resolve API call.
-No network calls -- runs entirely locally via ONNX runtime.
+Two-signal classifier: clip duration + face detection.
+
+  1. Duration  (ffprobe, instant)
+       < 60 s  → short clip  (B-roll territory)
+       > 120 s → long clip   (A-roll territory)
+
+  2. Face detection  (OpenCV Haar cascade, local, no cloud)
+       Samples 5 frames spread across the clip.
+       face_ratio = frames_with_face / frames_sampled
+
+Decision:
+  short + no face  → B-ROLL   (auto)
+  long  + face     → A-ROLL   (auto)
+  everything else  → AMBIGUOUS (user review: one-tap confirm)
+
+Audio is intentionally NOT used.  The user keeps a live mic on the
+interview subject while shooting B-roll, making any speech signal
+unreliable as a primary classifier.
+
+No network calls.  Runs entirely locally.
 """
 
 from __future__ import annotations
 
-import hashlib
+import json
 import shutil
 import subprocess
 import tempfile
@@ -16,121 +33,165 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-# ── Constants (single source of truth for tunable values) ─────────────────────
+# ── Tunable thresholds ────────────────────────────────────────────────────────
 
-AROLL_THRESHOLD: float = 0.60  # speech_ratio >= this -> A-ROLL
-BROLL_THRESHOLD: float = 0.05  # speech_ratio <= this -> B-ROLL
-VAD_THRESHOLD: float = 0.5  # silero confidence cutoff
-SAMPLING_RATE: int = 16_000
-MODEL_NAME: str = "silero_vad"
-MODEL_VERSION: str = "v6"
+BROLL_MAX_DURATION: float = 60.0  # clips shorter than this → B-roll leaning
+AROLL_MIN_DURATION: float = 120.0  # clips longer than this → A-roll leaning
+FACE_THRESHOLD: float = 0.40  # ≥40 % of sampled frames must contain a face
+FACE_SAMPLE_COUNT: int = 5  # frames sampled per clip
+FACE_MIN_SIZE: int = 50  # min face bounding-box edge (pixels) — filters noise
 
 _VIDEO_EXTS: set[str] = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
 
-# ── ffmpeg ────────────────────────────────────────────────────────────────────
+# ── Binary paths ──────────────────────────────────────────────────────────────
 
-# Prefer vendored binary; fall back to system ffmpeg for dev.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 FFMPEG_PATH: Path = _PROJECT_ROOT / "assets" / "bin" / "ffmpeg"
 if not FFMPEG_PATH.exists():
     FFMPEG_PATH = Path("ffmpeg")
 
-# ── Errors ────────────────────────────────────────────────────────────────────
+FFPROBE_PATH: Path = _PROJECT_ROOT / "assets" / "bin" / "ffprobe"
+if not FFPROBE_PATH.exists():
+    FFPROBE_PATH = Path("ffprobe")
+
+# ── OpenCV face cascade (lazy, module-level cache) ────────────────────────────
+
+_face_cascade: Any = None
 
 
-class AudioExtractionError(Exception):
-    """Raised when ffmpeg cannot extract audio from a clip."""
+def _get_face_cascade() -> Any:
+    global _face_cascade
+    if _face_cascade is None:
+        import cv2
 
-
-# ── Model cache ───────────────────────────────────────────────────────────────
-
-_model: Any = None
-
-
-def _get_model() -> Any:
-    global _model
-    if _model is None:
-        from silero_vad import load_silero_vad
-
-        _model = load_silero_vad()
-    return _model
-
-
-# ── Audio extraction ──────────────────────────────────────────────────────────
-
-
-def extract_audio(clip_path: str, tmp_dir: Path) -> Path:
-    """
-    Decode clip audio to a temporary 16 kHz mono WAV for Silero VAD.
-    Raises AudioExtractionError if ffmpeg exits non-zero.
-    Caller is responsible for cleaning up tmp_dir.
-    """
-    clip_hash = hashlib.sha256(clip_path.encode()).hexdigest()[:12]
-    out = tmp_dir / f"cairn-{clip_hash}.wav"
-    proc = subprocess.run(
-        [
-            str(FFMPEG_PATH),
-            "-y",
-            "-i",
-            clip_path,
-            "-ac",
-            "1",
-            "-ar",
-            str(SAMPLING_RATE),
-            "-f",
-            "wav",
-            "-vn",
-            str(out),
-        ],
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        raise AudioExtractionError(
-            f"ffmpeg exited {proc.returncode}: " + proc.stderr.decode(errors="replace")[-300:]
+        _face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
-    return out
+    return _face_cascade
 
 
-# ── VAD ───────────────────────────────────────────────────────────────────────
+# ── Duration ──────────────────────────────────────────────────────────────────
 
 
-def run_vad(wav_path: Path) -> dict[str, Any]:
+def get_duration(clip_path: str) -> float:
+    """Return clip duration in seconds via ffprobe.  Returns 0.0 on failure."""
+    try:
+        proc = subprocess.run(
+            [
+                str(FFPROBE_PATH),
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                clip_path,
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+        if proc.returncode != 0:
+            return 0.0
+        data: dict[str, Any] = json.loads(proc.stdout)
+        raw = data.get("format", {}).get("duration", "0")
+        return float(raw)
+    except Exception:
+        return 0.0
+
+
+# ── Frame extraction ──────────────────────────────────────────────────────────
+
+
+def extract_frames(clip_path: str, duration_sec: float, tmp_dir: Path) -> list[Path]:
     """
-    Run Silero VAD on a 16 kHz mono WAV.
-    Returns speech_ratio (0.0-1.0), speech_segments (seconds), and model info.
+    Extract FACE_SAMPLE_COUNT frames spread across the clip.
+
+    Frames are written to tmp_dir (caller cleans up).  We sample at
+    10 / 25 / 50 / 75 / 90 % to skip blank leader/trailer.  Frames are
+    downscaled to 640 px wide for speed — sufficient for face detection.
     """
-    from silero_vad import get_speech_timestamps, read_audio
+    if duration_sec <= 0:
+        return []
 
-    model = _get_model()
-    wav = read_audio(str(wav_path), sampling_rate=SAMPLING_RATE)
-    segments = get_speech_timestamps(
-        wav, model, threshold=VAD_THRESHOLD, sampling_rate=SAMPLING_RATE
-    )
-    total_speech = sum(s["end"] - s["start"] for s in segments)
-    speech_ratio = float(total_speech / len(wav)) if len(wav) > 0 else 0.0
+    fractions = [0.10, 0.25, 0.50, 0.75, 0.90][:FACE_SAMPLE_COUNT]
+    frames: list[Path] = []
 
-    return {
-        "speech_ratio": round(speech_ratio, 4),
-        "speech_segments": [
-            [round(s["start"] / SAMPLING_RATE, 3), round(s["end"] / SAMPLING_RATE, 3)]
-            for s in segments
-        ],
-        "model": MODEL_NAME,
-        "model_version": MODEL_VERSION,
-        "threshold_used": VAD_THRESHOLD,
-        "audio_stream": True,
-    }
+    for i, frac in enumerate(fractions):
+        ts = duration_sec * frac
+        out = tmp_dir / f"frame_{i:02d}.jpg"
+        proc = subprocess.run(
+            [
+                str(FFMPEG_PATH),
+                "-y",
+                "-ss",
+                f"{ts:.3f}",
+                "-i",
+                clip_path,
+                "-vframes",
+                "1",
+                "-q:v",
+                "5",
+                "-vf",
+                "scale=640:-1",
+                str(out),
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and out.exists():
+            frames.append(out)
+
+    return frames
+
+
+# ── Face detection ────────────────────────────────────────────────────────────
+
+
+def count_face_frames(frame_paths: list[Path]) -> int:
+    """
+    Return the number of frames that contain at least one detected face.
+    Uses the OpenCV frontal-face Haar cascade — fast, local, no model download.
+    """
+    import cv2
+
+    cascade = _get_face_cascade()
+    count = 0
+
+    for frame_path in frame_paths:
+        img = cv2.imread(str(frame_path))
+        if img is None:
+            continue
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(FACE_MIN_SIZE, FACE_MIN_SIZE),
+        )
+        if len(faces) > 0:
+            count += 1
+
+    return count
 
 
 # ── Classification decision ───────────────────────────────────────────────────
 
 
-def classify_clip(speech_ratio: float) -> str:
-    """Return 'A-ROLL', 'B-ROLL', or 'AMBIGUOUS' from speech_ratio."""
-    if speech_ratio >= AROLL_THRESHOLD:
-        return "A-ROLL"
-    if speech_ratio <= BROLL_THRESHOLD:
+def classify_clip(duration_sec: float, face_ratio: float) -> str:
+    """
+    Return 'A-ROLL', 'B-ROLL', or 'AMBIGUOUS'.
+
+    Rules come directly from the user's shooting style:
+      - B-roll: 5 s - ~1 min, no subject in frame
+      - A-roll: 1 min - 30 min, subject talking to camera
+    """
+    face_present = face_ratio >= FACE_THRESHOLD
+
+    if duration_sec < BROLL_MAX_DURATION and not face_present:
         return "B-ROLL"
+
+    if duration_sec >= AROLL_MIN_DURATION and face_present:
+        return "A-ROLL"
+
     return "AMBIGUOUS"
 
 
@@ -138,7 +199,7 @@ def classify_clip(speech_ratio: float) -> str:
 
 
 def scan_video_clips(shoot_folder: str | Path) -> list[str]:
-    """Return sorted absolute paths of all video clips in the organised folder."""
+    """Return sorted absolute paths of all video clips under 01_VIDEOS/."""
     folder = Path(shoot_folder)
     paths: list[str] = []
     for cam_dir in ("A_CAM", "B_CAM", "C_CAM"):
@@ -160,10 +221,10 @@ def classify_all(
     shoot_folder: str | Path,
 ) -> Iterator[dict[str, Any]]:
     """
-    Classify each clip. Yields one dict per clip, then a final summary dict.
-    Idempotent: clips with 'classify' in stages_complete are skipped without
-    re-running ffmpeg or VAD.
-    Writes sidecar before yielding each clip event.
+    Classify every clip.  Yields one event dict per clip plus a final summary.
+
+    Idempotent: skips clips whose sidecar already has 'classify' in
+    stages_complete.  Sidecar is written before the per-clip event is yielded.
     """
     import sidecar as sid
 
@@ -174,37 +235,39 @@ def classify_all(
         if existing and "classify" in existing.get("stages_complete", []):
             label = existing.get("classification", "UNKNOWN")
             _tally(counts, label, skipped=True)
+            meta = existing.get("classification_meta", {})
             yield {
                 "event": "clip_skipped",
                 "file": clip_path,
                 "label": label,
-                "speech_ratio": existing.get("vad", {}).get("speech_ratio", 0.0),
+                "duration_sec": meta.get("duration_sec", 0.0),
+                "face_ratio": meta.get("face_ratio", 0.0),
             }
             continue
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix="cairn-vad-"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="cairn-classify-"))
         try:
-            try:
-                wav_path = extract_audio(clip_path, tmp_dir)
-                vad_result: dict[str, Any] = run_vad(wav_path)
-            except AudioExtractionError as exc:
-                vad_result = {
-                    "speech_ratio": 0.0,
-                    "speech_segments": [],
-                    "model": MODEL_NAME,
-                    "model_version": MODEL_VERSION,
-                    "threshold_used": VAD_THRESHOLD,
-                    "audio_stream": False,
-                    "error": str(exc)[:200],
-                }
+            duration_sec = get_duration(clip_path)
 
-            label = classify_clip(vad_result["speech_ratio"])
+            frames = extract_frames(clip_path, duration_sec, tmp_dir)
+            face_frame_count = count_face_frames(frames) if frames else 0
+            face_ratio = face_frame_count / len(frames) if frames else 0.0
+
+            label = classify_clip(duration_sec, face_ratio)
             _tally(counts, label)
+
+            classification_meta: dict[str, Any] = {
+                "duration_sec": round(duration_sec, 2),
+                "face_ratio": round(face_ratio, 3),
+                "face_frames": face_frame_count,
+                "frames_sampled": len(frames),
+                "classifier_version": "v2-duration-face",
+            }
 
             sid.merge_clip(
                 shoot_folder,
                 clip_path,
-                updates={"classification": label, "vad": vad_result},
+                updates={"classification": label, "classification_meta": classification_meta},
                 new_stage="classify",
             )
 
@@ -212,8 +275,15 @@ def classify_all(
                 "event": "clip_classified",
                 "file": clip_path,
                 "label": label,
-                "speech_ratio": vad_result["speech_ratio"],
-                "audio_stream": vad_result.get("audio_stream", True),
+                "duration_sec": round(duration_sec, 2),
+                "face_ratio": round(face_ratio, 3),
+            }
+
+        except Exception as exc:
+            yield {
+                "event": "clip_error",
+                "file": clip_path,
+                "reason": str(exc)[:200],
             }
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -18,7 +18,8 @@
   interface AmbiguousClip {
     path: string;
     filename: string;
-    speechRatio: number;
+    durationSec: number;
+    faceRatio: number;
     thumbnailUrl: string | null;
     confirmed: ClassifyLabel | null;
     confirming: boolean;
@@ -58,7 +59,8 @@
             {
               path: ev.file,
               filename: ev.file.split("/").pop() ?? ev.file,
-              speechRatio: ev.speech_ratio ?? 0,
+              durationSec: ev.duration_sec ?? 0,
+              faceRatio: ev.face_ratio ?? 0,
               thumbnailUrl: null,
               confirmed: null,
               confirming: false,
@@ -114,13 +116,16 @@
   function formatProgress(ev: ClassifyProgressEvent): string {
     const filename = ev.file ? (ev.file.split("/").pop() ?? ev.file) : "";
     if (ev.event === "clip_classified") {
-      const pct =
-        ev.speech_ratio != null ? `${(ev.speech_ratio * 100).toFixed(0)}%`.padStart(4) : "  — ";
+      const dur = ev.duration_sec != null ? `${ev.duration_sec.toFixed(0)}s`.padStart(5) : "   —";
+      const face =
+        ev.face_ratio != null
+          ? `face ${(ev.face_ratio * 100).toFixed(0)}%`.padStart(9)
+          : "        ";
       const badge = (ev.label ?? "").padEnd(9);
-      return `${badge} ${pct}  ${filename}`;
+      return `${badge} ${dur} ${face}  ${filename}`;
     }
     if (ev.event === "clip_skipped") {
-      return `SKIPPED       ${filename}`;
+      return `SKIPPED                  ${filename}`;
     }
     return ev.event;
   }
@@ -194,8 +199,8 @@
               </div>
               <div class="clip-info">
                 <p class="clip-name">{clip.filename}</p>
-                <p class="speech-ratio">
-                  Speech: {(clip.speechRatio * 100).toFixed(0)}%
+                <p class="clip-meta">
+                  {clip.durationSec.toFixed(0)}s · face {(clip.faceRatio * 100).toFixed(0)}%
                 </p>
                 {#if clip.confirmed !== null}
                   <span class="badge {labelColor(clip.confirmed)}">{clip.confirmed}</span>
@@ -400,7 +405,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .speech-ratio {
+  .clip-meta {
     margin: 0 0 0.4rem 0;
     font-size: 0.8rem;
     color: #7f7f82;
