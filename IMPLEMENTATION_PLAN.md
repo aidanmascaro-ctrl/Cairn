@@ -430,12 +430,13 @@ See `specs/sidebar.md` for full detail.
 
 ### Session 10 tasks
 
-- [ ] Mac: `electron-builder` `.dmg` with notarisation; Apple Developer certificate + notary service
-- [ ] Windows: `electron-builder` `.exe` with code signing; EV cert or standard cert (decide at Session 10 start)
-- [ ] PyInstaller bundle: `pyinstaller classify.py transcribe.py …` into a single `workers` binary shipped inside the Electron `resources/` folder; update `getPythonPath()` to point at bundled binary first
-- [ ] Update auto-updater config (if using `electron-updater`)
-- [ ] Smoke-test: install on a clean macOS machine (no Python, no Node) — plugin must load and full pipeline must run
-- [ ] Commit: `chore: packaging + installers`; tag `v1.0.0-rc1`
+- [x] Mac: `packaging/build-mac.sh` — codesign + drag-install DMG + notarize; requires Apple Developer ID cert + notarytool credentials
+- [x] Windows: `electron-builder` NSIS installer via `packaging/electron-builder.json5`; custom `installer.nsh` sets install dir to Resolve plugin folder; standard code signing cert
+- [x] PyInstaller bundle: `packaging/workers.spec` → single `workers` binary; `getWorkersPath()` in `main.js` checks `resources/workers[.exe]` (prod) → `packaging/dist/workers[.exe]` (dev) → Python script fallback
+- [x] Entitlements: `packaging/entitlements.mac.plist` with hardened runtime flags for Python/ONNX Runtime
+- [x] Version bumped to `1.0.0-rc1` in `package.json` + `manifest.xml`
+- [ ] Smoke-test: install on a clean macOS machine (no Python, no Node) — plugin must load and full pipeline must run (requires Apple Developer cert to notarize — deferred until cert obtained)
+- [x] Commit: `chore: packaging + installers — PyInstaller bundle, Mac DMG, Windows NSIS, v1.0.0-rc1`; tag `v1.0.0-rc1`
 
 ---
 

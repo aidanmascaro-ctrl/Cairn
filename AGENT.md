@@ -38,7 +38,12 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 
 ## Packaging
 
-_TBD — Session 10._
+- **Mac DMG**: `bash packaging/build-mac.sh` — stages plugin folder, codesigns binaries with hardened runtime + `packaging/entitlements.mac.plist`, creates drag-install DMG (Cairn → symlink to Resolve plugin dir), notarizes via `xcrun notarytool`. Requires `APPLE_DEVELOPER_ID`, `APPLE_TEAM_ID`, `APPLE_ID`, `APPLE_APP_PASSWORD` env vars. Set `CAIRN_SKIP_NOTARIZE=1` for local builds without certs.
+- **Windows NSIS**: `npm run package:win` — electron-builder with `packaging/electron-builder.json5`. Installs to `%ProgramData%\Blackmagic Design\DaVinci Resolve\Support\Workflow Integration Plugins\Cairn`. Uses `packaging/installer.nsh` to override `$INSTDIR`. Requires `WIN_CERT_PATH` + `WIN_CERT_PASSWORD`.
+- **Python bundle**: `npm run package:python` — runs PyInstaller against `packaging/workers.spec`, outputs `packaging/dist/workers` (Mac) or `packaging/dist/workers.exe` (Win). Must run in the same Python env that has all deps (`silero-vad`, `assemblyai`, `anthropic`, etc.) + `pyinstaller`.
+- **Runtime path resolution**: `getWorkersPath()` in `main.js` checks for `resources/workers[.exe]` (production) then `packaging/dist/workers[.exe]` (dev build). Falls back to Python script + system Python if neither is present.
+- **Entitlements**: `cs.allow-unsigned-executable-memory` required for ONNX Runtime JIT. `cs.disable-library-validation` required for PyInstaller's bundled third-party dylibs (ctranslate2, onnxruntime). Both are Apple-approved for Python-based bundles.
+- **SetCurrentTimecode for click-to-jump**: Uses source timecode (`in_tc` from sidecar) — best-effort; works for cameras that start at 00:00:00:00. Cameras with absolute timecode may not seek exactly. Documented as v1 limitation.
 
 ---
 
