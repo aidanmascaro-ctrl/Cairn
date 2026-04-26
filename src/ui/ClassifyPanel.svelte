@@ -20,6 +20,7 @@
     filename: string;
     durationSec: number;
     faceRatio: number;
+    motionScore: number;
     thumbnailUrl: string | null;
     confirmed: ClassifyLabel | null;
     confirming: boolean;
@@ -61,6 +62,7 @@
               filename: ev.file.split("/").pop() ?? ev.file,
               durationSec: ev.duration_sec ?? 0,
               faceRatio: ev.face_ratio ?? 0,
+              motionScore: ev.motion_score ?? 0,
               thumbnailUrl: null,
               confirmed: null,
               confirming: false,
@@ -121,8 +123,9 @@
         ev.face_ratio != null
           ? `face ${(ev.face_ratio * 100).toFixed(0)}%`.padStart(9)
           : "        ";
+      const motion = ev.motion_score != null ? `  motion ${ev.motion_score.toFixed(3)}` : "";
       const badge = (ev.label ?? "").padEnd(9);
-      return `${badge} ${dur} ${face}  ${filename}`;
+      return `${badge} ${dur} ${face}${motion}  ${filename}`;
     }
     if (ev.event === "clip_skipped") {
       return `SKIPPED                  ${filename}`;
@@ -200,7 +203,8 @@
               <div class="clip-info">
                 <p class="clip-name">{clip.filename}</p>
                 <p class="clip-meta">
-                  {clip.durationSec.toFixed(0)}s · face {(clip.faceRatio * 100).toFixed(0)}%
+                  {clip.durationSec.toFixed(0)}s · face {(clip.faceRatio * 100).toFixed(0)}% ·
+                  motion {clip.motionScore.toFixed(3)}
                 </p>
                 {#if clip.confirmed !== null}
                   <span class="badge {labelColor(clip.confirmed)}">{clip.confirmed}</span>

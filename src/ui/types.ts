@@ -110,6 +110,7 @@ export interface ClassifyProgressEvent {
   label?: ClassifyLabel;
   duration_sec?: number;
   face_ratio?: number;
+  motion_score?: number;
   resolve_ok?: boolean | null;
   total_clips?: number;
   // summary fields (classify_complete)

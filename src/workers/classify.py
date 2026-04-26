@@ -35,11 +35,15 @@ from typing import Any
 
 # ── Tunable thresholds ────────────────────────────────────────────────────────
 
-BROLL_MAX_DURATION: float = 60.0  # clips shorter than this → B-roll leaning
-AROLL_MIN_DURATION: float = 120.0  # clips longer than this → A-roll leaning
-FACE_THRESHOLD: float = 0.40  # ≥40 % of sampled frames must contain a face
+FACE_THRESHOLD: float = 0.40  # rule-based fallback: >=40% frames with face
 FACE_SAMPLE_COUNT: int = 5  # frames sampled per clip
 FACE_MIN_SIZE: int = 50  # min face bounding-box edge (pixels) — filters noise
+
+# KNN classifier (trained on ~/.cairn/ground_truth.json)
+GROUND_TRUTH_PATH: Path = Path.home() / ".cairn" / "ground_truth.json"
+KNN_K: int = 5
+KNN_MIN_EXAMPLES: int = 5
+KNN_CONFIDENCE_THRESHOLD: float = 0.70
 
 _VIDEO_EXTS: set[str] = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
 
@@ -71,6 +75,7 @@ FFPROBE_PATH: Path = _find_bin("ffprobe")
 # ── OpenCV face cascade (lazy, module-level cache) ────────────────────────────
 
 _face_cascade: Any = None
+_gt_examples: list[dict[str, Any]] | None = None
 
 
 def _get_face_cascade() -> Any:
@@ -187,25 +192,109 @@ def count_face_frames(frame_paths: list[Path]) -> int:
     return count
 
 
+# ── Motion score ─────────────────────────────────────────────────────────────
+
+
+def compute_motion_score(frame_paths: list[Path]) -> float:
+    """
+    Mean normalised frame-to-frame absolute pixel difference (0=static, 1=chaos).
+    Reuses the frames already extracted for face detection.
+    """
+    import cv2
+    import numpy as np
+
+    grays: list[np.ndarray] = []
+    for fp in frame_paths:
+        img = cv2.imread(str(fp), cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            grays.append(img.astype(np.float32) / 255.0)
+
+    if len(grays) < 2:
+        return 0.0
+
+    diffs = [float(np.mean(np.abs(grays[i] - grays[i - 1]))) for i in range(1, len(grays))]
+    return round(float(np.mean(diffs)), 4)
+
+
+# ── KNN classifier ────────────────────────────────────────────────────────────
+
+
+def _load_ground_truth() -> list[dict[str, Any]]:
+    """Load enriched clips from ground truth JSON. Cached for the process lifetime."""
+    global _gt_examples
+    if _gt_examples is not None:
+        return _gt_examples
+    if not GROUND_TRUTH_PATH.exists():
+        _gt_examples = []
+        return _gt_examples
+    try:
+        with open(GROUND_TRUTH_PATH) as f:
+            data: dict[str, Any] = json.load(f)
+        _gt_examples = [
+            c
+            for c in data.get("clips", [])
+            if "face_ratio" in c.get("features", {}) and "motion_score" in c.get("features", {})
+        ]
+    except Exception:
+        _gt_examples = []
+    return _gt_examples
+
+
+def _knn_predict(face_ratio: float, motion_score: float) -> tuple[str, float] | None:
+    """
+    KNN prediction using face_ratio and motion_score.
+    Returns (label, confidence) or None when insufficient data or confidence < threshold.
+    """
+    examples = _load_ground_truth()
+    if len(examples) < KNN_MIN_EXAMPLES:
+        return None
+
+    all_face = [c["features"]["face_ratio"] for c in examples]
+    all_motion = [c["features"]["motion_score"] for c in examples]
+    face_rng = (max(all_face) - min(all_face)) or 1.0
+    motion_rng = (max(all_motion) - min(all_motion)) or 1.0
+
+    def _dist(c: dict[str, Any]) -> float:
+        df = (c["features"]["face_ratio"] - face_ratio) / face_rng
+        dm = (c["features"]["motion_score"] - motion_score) / motion_rng
+        return df * df + dm * dm
+
+    neighbours = sorted(examples, key=_dist)[:KNN_K]
+    labels = [n["label"] for n in neighbours]
+    top = max(set(labels), key=labels.count)
+    confidence = labels.count(top) / KNN_K
+
+    if confidence < KNN_CONFIDENCE_THRESHOLD:
+        return None
+    return top, confidence
+
+
 # ── Classification decision ───────────────────────────────────────────────────
 
 
-def classify_clip(duration_sec: float, face_ratio: float) -> str:
+def classify_clip(
+    duration_sec: float,
+    face_ratio: float,
+    motion_score: float = 0.0,
+) -> str:
     """
     Return 'A-ROLL', 'B-ROLL', or 'AMBIGUOUS'.
 
-    Rules come directly from the user's shooting style:
-      - B-roll: 5 s - ~1 min, no subject in frame
-      - A-roll: 1 min - 30 min, subject talking to camera
+    KNN lookup against labeled examples is tried first.
+    Falls back to AMBIGUOUS when no trained data exists or confidence is low.
+    Rule-based is only used when there are too few training examples.
     """
-    face_present = face_ratio >= FACE_THRESHOLD
+    knn = _knn_predict(face_ratio, motion_score)
+    if knn is not None:
+        return knn[0]
 
-    if duration_sec < BROLL_MAX_DURATION and not face_present:
+    # Not enough training data — use simple rule-based fallback
+    if len(_load_ground_truth()) < KNN_MIN_EXAMPLES:
+        if face_ratio >= FACE_THRESHOLD:
+            return "A-ROLL"
         return "B-ROLL"
 
-    if duration_sec >= AROLL_MIN_DURATION and face_present:
-        return "A-ROLL"
-
+    # KNN had low confidence — flag for user review
     return "AMBIGUOUS"
 
 
@@ -256,6 +345,7 @@ def classify_all(
                 "label": label,
                 "duration_sec": meta.get("duration_sec", 0.0),
                 "face_ratio": meta.get("face_ratio", 0.0),
+                "motion_score": meta.get("motion_score", 0.0),
             }
             continue
 
@@ -266,8 +356,9 @@ def classify_all(
             frames = extract_frames(clip_path, duration_sec, tmp_dir)
             face_frame_count = count_face_frames(frames) if frames else 0
             face_ratio = face_frame_count / len(frames) if frames else 0.0
+            motion_score = compute_motion_score(frames) if frames else 0.0
 
-            label = classify_clip(duration_sec, face_ratio)
+            label = classify_clip(duration_sec, face_ratio, motion_score)
             _tally(counts, label)
 
             classification_meta: dict[str, Any] = {
@@ -275,7 +366,8 @@ def classify_all(
                 "face_ratio": round(face_ratio, 3),
                 "face_frames": face_frame_count,
                 "frames_sampled": len(frames),
-                "classifier_version": "v2-duration-face",
+                "motion_score": motion_score,
+                "classifier_version": "v3-knn-face-motion",
             }
 
             sid.merge_clip(
@@ -291,6 +383,7 @@ def classify_all(
                 "label": label,
                 "duration_sec": round(duration_sec, 2),
                 "face_ratio": round(face_ratio, 3),
+                "motion_score": motion_score,
             }
 
         except Exception as exc:

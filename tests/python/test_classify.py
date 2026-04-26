@@ -1,4 +1,4 @@
-"""Tests for the classify worker (duration + face detection classifier)."""
+"""Tests for the classify worker (KNN + face-detection classifier)."""
 
 from __future__ import annotations
 
@@ -17,41 +17,94 @@ import classify
 
 
 class TestClassifyClip:
-    def test_short_no_face_is_broll(self):
-        assert classify.classify_clip(30.0, 0.0) == "B-ROLL"
+    def setup_method(self):
+        classify._gt_examples = None
 
-    def test_short_no_face_at_boundary(self):
-        # exactly 59.9 s, no face → still B-ROLL
-        assert classify.classify_clip(59.9, 0.0) == "B-ROLL"
+    def teardown_method(self):
+        classify._gt_examples = None
 
-    def test_short_with_face_is_ambiguous(self):
-        assert classify.classify_clip(30.0, 0.8) == "AMBIGUOUS"
+    def _make_examples(self, n_aroll: int, n_broll: int) -> list[dict]:
+        examples = []
+        for _ in range(n_aroll):
+            examples.append(
+                {"label": "A-ROLL", "features": {"face_ratio": 0.8, "motion_score": 0.01}}
+            )
+        for _ in range(n_broll):
+            examples.append(
+                {"label": "B-ROLL", "features": {"face_ratio": 0.0, "motion_score": 0.10}}
+            )
+        return examples
 
-    def test_long_with_face_is_aroll(self):
-        assert classify.classify_clip(300.0, 1.0) == "A-ROLL"
+    def test_no_gt_face_present_is_aroll(self):
+        classify._gt_examples = []
+        assert classify.classify_clip(0.0, 0.8, 0.01) == "A-ROLL"
 
-    def test_long_with_face_at_threshold(self):
-        # face_ratio exactly at FACE_THRESHOLD
-        assert classify.classify_clip(200.0, classify.FACE_THRESHOLD) == "A-ROLL"
+    def test_no_gt_no_face_is_broll(self):
+        classify._gt_examples = []
+        assert classify.classify_clip(0.0, 0.0, 0.10) == "B-ROLL"
 
-    def test_long_no_face_is_ambiguous(self):
-        assert classify.classify_clip(300.0, 0.0) == "AMBIGUOUS"
+    def test_knn_confident_aroll_prediction(self):
+        classify._gt_examples = self._make_examples(n_aroll=10, n_broll=10)
+        # query matches A-ROLL cluster closely
+        result = classify.classify_clip(0.0, 0.8, 0.01)
+        assert result == "A-ROLL"
 
-    def test_mid_duration_any_face_is_ambiguous(self):
-        # 60 s - 120 s range: always AMBIGUOUS regardless of face
-        assert classify.classify_clip(90.0, 0.0) == "AMBIGUOUS"
-        assert classify.classify_clip(90.0, 1.0) == "AMBIGUOUS"
+    def test_knn_confident_broll_prediction(self):
+        classify._gt_examples = self._make_examples(n_aroll=10, n_broll=10)
+        # query matches B-ROLL cluster closely
+        result = classify.classify_clip(0.0, 0.0, 0.10)
+        assert result == "B-ROLL"
 
-    def test_exactly_at_broll_max_is_ambiguous(self):
-        # BROLL_MAX_DURATION = 60.0: duration >= 60 is NOT in the short bucket
-        assert classify.classify_clip(classify.BROLL_MAX_DURATION, 0.0) == "AMBIGUOUS"
+    def test_knn_low_confidence_returns_ambiguous(self):
+        # 5 A-ROLL and 5 B-ROLL equidistant from the query point → split vote → AMBIGUOUS
+        examples = [
+            {"label": "A-ROLL", "features": {"face_ratio": 1.0, "motion_score": 0.0}},
+            {"label": "A-ROLL", "features": {"face_ratio": 1.0, "motion_score": 0.0}},
+            {"label": "B-ROLL", "features": {"face_ratio": 0.0, "motion_score": 1.0}},
+            {"label": "B-ROLL", "features": {"face_ratio": 0.0, "motion_score": 1.0}},
+            # 5th equidistant from both clusters (midpoint) — neither wins by 70%
+            {"label": "A-ROLL", "features": {"face_ratio": 1.0, "motion_score": 0.0}},
+        ]
+        classify._gt_examples = examples
+        # query at the midpoint: face=0.5, motion=0.5 → nearest 5 are 3 A-ROLL + 2 B-ROLL
+        # 3/5 = 60% < KNN_CONFIDENCE_THRESHOLD (0.70) → AMBIGUOUS
+        result = classify.classify_clip(0.0, 0.5, 0.5)
+        assert result == "AMBIGUOUS"
 
-    def test_exactly_at_aroll_min_with_face_is_aroll(self):
-        assert classify.classify_clip(classify.AROLL_MIN_DURATION, 1.0) == "A-ROLL"
+    def test_fewer_than_min_examples_uses_rule_based(self):
+        # Only 3 enriched examples — below KNN_MIN_EXAMPLES (5)
+        classify._gt_examples = [
+            {"label": "A-ROLL", "features": {"face_ratio": 0.8, "motion_score": 0.01}},
+            {"label": "A-ROLL", "features": {"face_ratio": 0.6, "motion_score": 0.02}},
+            {"label": "B-ROLL", "features": {"face_ratio": 0.0, "motion_score": 0.10}},
+        ]
+        assert classify.classify_clip(0.0, 0.8, 0.01) == "A-ROLL"
+        assert classify.classify_clip(0.0, 0.0, 0.10) == "B-ROLL"
 
-    def test_just_below_face_threshold_is_not_aroll(self):
-        ratio_just_below = classify.FACE_THRESHOLD - 0.01
-        assert classify.classify_clip(300.0, ratio_just_below) == "AMBIGUOUS"
+
+# ── _knn_predict ──────────────────────────────────────────────────────────────
+
+
+class TestKnnPredict:
+    def setup_method(self):
+        classify._gt_examples = None
+
+    def teardown_method(self):
+        classify._gt_examples = None
+
+    def test_returns_none_when_no_gt(self):
+        classify._gt_examples = []
+        assert classify._knn_predict(0.5, 0.05) is None
+
+    def test_returns_label_and_confidence(self):
+        classify._gt_examples = [
+            {"label": "A-ROLL", "features": {"face_ratio": 0.8, "motion_score": 0.01}}
+        ] * 10
+        result = classify._knn_predict(0.8, 0.01)
+        assert result is not None
+        label, conf = result
+        assert label == "A-ROLL"
+        assert conf == pytest.approx(1.0)
 
 
 # ── count_face_frames (mocked OpenCV) ────────────────────────────────────────
@@ -71,7 +124,6 @@ def _make_cv2_stub(imread_return=None, cvtcolor_return=None, detect_return=None)
 
 class TestCountFaceFrames:
     def setup_method(self):
-        # reset the lazy cascade cache so each test gets a clean stub
         classify._face_cascade = None
 
     def teardown_method(self):
