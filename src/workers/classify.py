@@ -25,9 +25,11 @@ No network calls.  Runs entirely locally.
 
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -92,8 +94,8 @@ def _get_face_cascade() -> Any:
 # ── Duration ──────────────────────────────────────────────────────────────────
 
 
-def get_duration(clip_path: str) -> float:
-    """Return clip duration in seconds via ffprobe.  Returns 0.0 on failure."""
+def get_duration(clip_path: str) -> float | None:
+    """Return clip duration in seconds via ffprobe, or None on failure."""
     try:
         proc = subprocess.run(
             [
@@ -109,12 +111,12 @@ def get_duration(clip_path: str) -> float:
             timeout=15,
         )
         if proc.returncode != 0:
-            return 0.0
+            return None
         data: dict[str, Any] = json.loads(proc.stdout)
         raw = data.get("format", {}).get("duration", "0")
         return float(raw)
     except Exception:
-        return 0.0
+        return None
 
 
 # ── Frame extraction ──────────────────────────────────────────────────────────
@@ -235,8 +237,12 @@ def _load_ground_truth() -> list[dict[str, Any]]:
             for c in data.get("clips", [])
             if "face_ratio" in c.get("features", {}) and "motion_score" in c.get("features", {})
         ]
-    except Exception:
-        _gt_examples = []
+    except Exception as exc:
+        print(
+            f"[classify.py] Failed to load ground truth from {GROUND_TRUTH_PATH}: {exc}",
+            file=sys.stderr,
+        )
+        return []  # don't cache — allow retry on next clip
     return _gt_examples
 
 
@@ -352,6 +358,13 @@ def classify_all(
         tmp_dir = Path(tempfile.mkdtemp(prefix="cairn-classify-"))
         try:
             duration_sec = get_duration(clip_path)
+            if duration_sec is None:
+                yield {
+                    "event": "clip_error",
+                    "file": clip_path,
+                    "reason": "ffprobe failed — clip may be corrupt or unreadable",
+                }
+                continue
 
             frames = extract_frames(clip_path, duration_sec, tmp_dir)
             face_frame_count = count_face_frames(frames) if frames else 0
@@ -403,6 +416,177 @@ def classify_all(
         "skipped": counts["skipped"],
         "total": len(clip_paths),
     }
+
+
+def inspect_clip(clip_path: str) -> dict[str, Any]:
+    """
+    Re-analyse a clip and return annotated frame images for the visual inspector.
+
+    Extracts the same 5 frames used during classification, runs face detection
+    to get bounding boxes, computes per-frame motion diffs, then draws overlays
+    (cyan face rectangles, motion intensity bar) onto each frame.
+
+    Returns base64-encoded JPEG data URLs so the renderer can display them
+    directly without writing any temp files to disk after the call returns.
+    """
+    import cv2
+    import numpy as np
+
+    duration_sec = get_duration(clip_path)
+    if duration_sec is None:
+        return {
+            "ok": False,
+            "duration_sec": 0.0,
+            "face_ratio": 0.0,
+            "motion_score": 0.0,
+            "knn_label": None,
+            "knn_confidence": None,
+            "frames": [],
+            "error": "ffprobe failed — clip may be corrupt or unreadable",
+        }
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cairn-inspect-"))
+    try:
+        frames = extract_frames(clip_path, duration_sec, tmp_dir)
+        if not frames:
+            return {
+                "ok": False,
+                "duration_sec": round(duration_sec, 2),
+                "face_ratio": 0.0,
+                "motion_score": 0.0,
+                "knn_label": None,
+                "knn_confidence": None,
+                "frames": [],
+                "error": "No frames could be extracted from clip",
+            }
+
+        cascade = _get_face_cascade()
+        fractions = [0.10, 0.25, 0.50, 0.75, 0.90][:FACE_SAMPLE_COUNT]
+
+        grays: list[Any] = []
+        raw: list[dict[str, Any]] = []
+
+        for i, (frame_path, frac) in enumerate(zip(frames, fractions, strict=False)):
+            img = cv2.imread(str(frame_path))
+            if img is None:
+                continue
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            grays.append(gray.astype(np.float32) / 255.0)
+
+            faces = cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(FACE_MIN_SIZE, FACE_MIN_SIZE),
+            )
+            face_boxes = (
+                [[int(x), int(y), int(w), int(h)] for x, y, w, h in faces] if len(faces) else []
+            )
+            raw.append(
+                {
+                    "frame_idx": i,
+                    "timestamp_sec": round(duration_sec * frac, 2),
+                    "face_boxes": face_boxes,
+                    "img": img,
+                }
+            )
+
+        # Per-frame motion diffs (first frame has no prior → 0.0)
+        motion_diffs: list[float] = [0.0]
+        for i in range(1, len(grays)):
+            diff = float(np.mean(np.abs(grays[i] - grays[i - 1])))
+            motion_diffs.append(round(diff, 4))
+        max_motion = max(motion_diffs) if max(motion_diffs) > 0 else 1.0
+
+        # Annotate frames and encode to base64 JPEG
+        annotated: list[dict[str, Any]] = []
+        for fd, motion_diff in zip(raw, motion_diffs, strict=False):
+            img_ann = fd["img"].copy()
+            img_h, img_w = img_ann.shape[:2]
+
+            # Cyan face bounding boxes
+            for x, y, bw, bh in fd["face_boxes"]:
+                cv2.rectangle(img_ann, (x, y), (x + bw, y + bh), (255, 210, 0), 2)
+                cv2.putText(
+                    img_ann,
+                    "face",
+                    (x, max(y - 6, 14)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.38,
+                    (255, 210, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            # Motion intensity bar — 10px strip at bottom edge
+            motion_norm = motion_diff / max_motion
+            bar_h = 10
+            bar_px = max(int(img_w * motion_norm), 0)
+            if motion_norm < 0.33:
+                bar_color = (60, 190, 80)  # green — low
+            elif motion_norm < 0.67:
+                bar_color = (60, 200, 210)  # amber — medium
+            else:
+                bar_color = (60, 80, 230)  # red — high
+            cv2.rectangle(img_ann, (0, img_h - bar_h), (bar_px, img_h), bar_color, -1)
+
+            # Timestamp label above the bar
+            cv2.putText(
+                img_ann,
+                f"{fd['timestamp_sec']:.1f}s",
+                (4, img_h - bar_h - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.32,
+                (200, 200, 200),
+                1,
+                cv2.LINE_AA,
+            )
+
+            ok_enc, buf = cv2.imencode(".jpg", img_ann, [cv2.IMWRITE_JPEG_QUALITY, 82])
+            if not ok_enc:
+                continue
+            b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+            annotated.append(
+                {
+                    "frame_idx": fd["frame_idx"],
+                    "timestamp_sec": fd["timestamp_sec"],
+                    "face_count": len(fd["face_boxes"]),
+                    "motion_diff": motion_diff,
+                    "data_url": f"data:image/jpeg;base64,{b64}",
+                }
+            )
+
+        face_frame_count = sum(1 for fd in raw if fd["face_boxes"])
+        face_ratio = round(face_frame_count / len(raw), 3) if raw else 0.0
+        motion_score = round(float(np.mean(motion_diffs[1:])), 4) if len(motion_diffs) > 1 else 0.0
+
+        knn_result = _knn_predict(face_ratio, motion_score)
+
+        return {
+            "ok": True,
+            "duration_sec": round(duration_sec, 2),
+            "face_ratio": face_ratio,
+            "motion_score": motion_score,
+            "knn_label": knn_result[0] if knn_result else None,
+            "knn_confidence": round(knn_result[1], 3) if knn_result else None,
+            "frames": annotated,
+            "error": None,
+        }
+
+    except Exception as exc:
+        print(f"[classify.py] inspect_clip failed for {clip_path}: {exc}", file=sys.stderr)
+        return {
+            "ok": False,
+            "duration_sec": 0.0,
+            "face_ratio": 0.0,
+            "motion_score": 0.0,
+            "knn_label": None,
+            "knn_confidence": None,
+            "frames": [],
+            "error": str(exc)[:300],
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _tally(counts: dict[str, int], label: str, *, skipped: bool = False) -> None:

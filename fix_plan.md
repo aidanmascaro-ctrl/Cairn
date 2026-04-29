@@ -30,11 +30,12 @@ Each entry:
 
 ### Bin structure in Resolve media pool unverified
 
-- **Status:** open
+- **Status:** in-progress
 - **Opened:** Session 2 / 2026-04-25
 - **Area:** `src/workers/resolve_import.py`
 - **Symptom / gap:** `resolve_import.py` was updated to use `_find_or_create()` per-bin approach (creating `<shoot>/01_VIDEOS/A_CAM`, `/C_CAM`, `/02_PHOTOS` bins in Resolve Master), but this was not tested live before the session ended. Prior versions imported clips flat into Master.
-- **Next step:** After rebuild above, run ingest on an already-organised folder; verify Resolve media pool shows the nested bin structure, not flat clips in Master.
+- **MCP verified 2026-04-29:** `mp.AddSubFolder(parent, name)` (two-arg form on MediaPool) and `mp.SetCurrentFolder` both confirmed working via MCP test on Resolve Studio 21.0.0b.20. Nested path `Master/_cairn_test/01_VIDEOS/A_CAM` created successfully and cleaned up. API shape matches `resolve_import.py` — per-bin strategy is correct.
+- **Next step:** Rebuild plugin (`sudo chown -R $(whoami) dist && npm run build:ui && sudo bash packaging/install-dev-plugin.sh`), restart Resolve, run ingest end-to-end to confirm clips land in nested bins.
 
 ### Photomator Edit Documents not moving to 02_PHOTOS
 

@@ -26,6 +26,7 @@ import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
 import sidecar
+import timeline as timeline_worker
 
 # ── Single-response handlers ──────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
         shoot_folder,
         clip_path,
         updates={"classification": label, "user_confirmed": True},
-        new_stage=None,
+        new_stage="classify",
     )
 
     resolve_ok = False
@@ -83,10 +84,41 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_build_timeline(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build the assembly timeline (Stage 4) — A-roll on V1/A1, B-roll on V2/A2.
+    Single-response handler; returns ok:true with counts or ok:false with error.
+    """
+    payload = msg.get("payload", {})
+    path: str = payload["path"]
+    name: str | None = payload.get("name")
+
+    result = timeline_worker.build_timeline(path, name)
+    return {
+        "id": msg["id"],
+        "type": "build_timeline_result",
+        **result,
+    }
+
+
+def handle_classify_inspect(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Re-analyse a single clip and return annotated frames for the visual inspector.
+    The heavy work (frame extraction + cv2 overlay) runs in classify_worker.
+    """
+    payload = msg.get("payload", {})
+    clip_path: str = payload["clip_path"]
+
+    result = classify_worker.inspect_clip(clip_path)
+    return {"id": msg["id"], "type": "classify_inspect_result", **result}
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
     "classify_confirm": handle_classify_confirm,
+    "classify_inspect": handle_classify_inspect,
+    "build_timeline": handle_build_timeline,
 }
 
 # ── Streaming handlers ────────────────────────────────────────────────────────
@@ -236,7 +268,22 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
             return
 
         resolve_ok: bool | None = None
+        sidecar_ok: bool | None = None
         if not dry_run and event.get("event") == "clip_classified":
+            try:
+                sidecar.merge_clip(
+                    path,
+                    event["file"],
+                    updates={"classification": event["label"]},
+                    new_stage="classify",
+                )
+                sidecar_ok = True
+            except Exception as exc:
+                sidecar_ok = False
+                print(
+                    f"[bridge.py] Sidecar write failed for {event['file']}: {exc}",
+                    file=sys.stderr,
+                )
             try:
                 resolve_ok = resolve_api.classify_write_resolve(event["file"], event["label"])
             except Exception as exc:
@@ -246,7 +293,13 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
                     file=sys.stderr,
                 )
 
-        yield {"id": msg_id, "type": "classify_progress", "resolve_ok": resolve_ok, **event}
+        yield {
+            "id": msg_id,
+            "type": "classify_progress",
+            "resolve_ok": resolve_ok,
+            "sidecar_ok": sidecar_ok,
+            **event,
+        }
 
 
 STREAMING_HANDLERS: dict[str, Any] = {

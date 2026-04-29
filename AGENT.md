@@ -30,6 +30,9 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 - **Python Scripting API for bin creation:** Python API requires "Preferences → General → External scripting: Local" to be enabled. Spawn as a subprocess from Node via `resolve_import.py`; kill with `SIGKILL` after 15 s timeout if it hangs.
 - **`AddSubFolder` is on MediaPool, NOT MediaPoolFolder:** Use `mp.AddSubFolder(parentFolder, name)`. Calling `folder.AddSubFolder(name)` returns `None` (attribute doesn't exist on folder objects) and throws `TypeError: 'NoneType' object is not callable`.
 - **External drives + rglob:** `folder.rglob("*")` and `send2trash` can hang indefinitely on large external SSDs (Samsung Evo 4TB confirmed). All Python bridge calls are wrapped in a 45 s `Promise.race` timeout in `main.js`.
+- **`mp.AddSubFolder(parent, name)` is on MediaPool, not the folder.** The `folder.AddSubFolder(name)` form returns None / errors; the `MediaPool.AddSubFolder(parent_folder, name)` two-arg form is the working signature in current Resolve versions. Documented in `resolve_import.py::_find_or_create`.
+- **Stage 4 timeline assembly (`timeline.py`):** `MediaPool.CreateEmptyTimeline(name)` makes the new timeline current automatically; `mp.AppendToTimeline(clips)` lands video on V1, audio on A1. To put B-roll on V2/A2: call `timeline.AddTrack("video")` + `AddTrack("audio")` to create the destination tracks, then `timeline.SetTrackLock("video", 1, True)` + `SetTrackLock("audio", 1, True)` so the next AppendToTimeline routes to V2/A2. Unlock V1/A1 afterwards. Both AddTrack and SetTrackLock are wrapped in `contextlib.suppress` since older Resolve versions may not expose them.
+- **Project framerate is global** — `project.SetSetting("timelineFrameRate", "23.976")` works only if no timeline yet exists at a different fps. After the first timeline, the project rate is locked. `timeline.py` records a warning when SetSetting returns False and proceeds with whatever fps the project has.
 
 ## Python workers
 
@@ -46,6 +49,15 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 - **SetCurrentTimecode for click-to-jump**: Uses source timecode (`in_tc` from sidecar) — best-effort; works for cameras that start at 00:00:00:00. Cameras with absolute timecode may not seek exactly. Documented as v1 limitation.
 
 ---
+
+## DaVinci Resolve MCP (dev sessions only)
+
+- **What it is:** `mcp__davinci-resolve__*` tools are available to Claude Code during dev sessions. They connect to Resolve via the same Python Scripting API the plugin uses (requires External Scripting enabled). They are **NOT available to the Cairn Electron plugin at runtime** — the plugin still uses `resolve_import.py` + `resolve_api.py`.
+- **Why it matters:** Live Resolve verification without user screenshots. Test bin creation, clip colours, timeline operations, and media pool state directly during the session.
+- **Confirmed working (2026-04-29):** `media_pool.add_subfolder(name, parent_path)` with path strings like `"Master/shoot/01_VIDEOS"` creates nested bins correctly. Tested and cleaned up in "060426 NE Red Track" project on Resolve Studio 21.0.0b.20.
+- **External Scripting confirmed enabled** on this machine — MCP connects successfully → `resolve_import.py` subprocess will also connect successfully.
+- **Key tools:** `resolve_control.get_version()` (verify live), `media_pool.add_subfolder/import_media/import_folder`, `folder.get_subfolders/get_clips`, `media_pool_item.set_clip_color/set_metadata`, `timeline.add_track/set_track_lock`, `project_settings.get_setting/set_setting`, `project_manager.get_current`.
+- **Test pattern:** Create test bins under `Master/_cairn_test`, verify, delete with `media_pool.delete_folders([id])`. Never import media into a user's live project during testing.
 
 ## Platform-specific gotchas
 

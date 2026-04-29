@@ -15,6 +15,8 @@ import { z } from "zod";
 
 // ── Message schemas ──────────────────────────────────────────────────────────
 
+const ClassifyLabelSchema = z.enum(["A-ROLL", "B-ROLL", "AMBIGUOUS", "UNKNOWN"]);
+
 export const OutboundMessageSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("echo"), payload: z.string() }),
   z.object({ id: z.string(), type: z.literal("ping") }),
@@ -29,10 +31,36 @@ export const OutboundMessageSchema = z.discriminatedUnion("type", [
       resolve: z.boolean().optional(),
     }),
   }),
+  z.object({
+    id: z.string(),
+    type: z.literal("classify"),
+    payload: z.object({
+      path: z.string(),
+      dry_run: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("classify_confirm"),
+    payload: z.object({
+      clip_path: z.string(),
+      label: ClassifyLabelSchema,
+      shoot_folder: z.string(),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("build_timeline"),
+    payload: z.object({
+      path: z.string(),
+      name: z.string().optional(),
+    }),
+  }),
 ]);
 
 const ClipPathsSchema = z.object({
   a_cam: z.array(z.string()),
+  c_cam: z.array(z.string()),
   photos: z.array(z.string()),
   assets: z.array(z.string()).optional(),
 });
@@ -67,12 +95,12 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
     id: z.string(),
     type: z.literal("ingest_progress"),
     event: z.string(),
-    // Allow arbitrary extra fields for event-specific data
     src: z.string().optional(),
     dst: z.string().optional(),
     count: z.number().optional(),
     reason: z.string().optional(),
     dry_run: z.boolean().optional(),
+    total: z.number().optional(),
   }),
   // Ingest complete — final; resolves the call
   z.object({
@@ -87,12 +115,75 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
     dry_run: z.boolean(),
     timestamp_iso: z.string(),
   }),
+  // Classify progress — intermediate; does not resolve the call
+  z.object({
+    id: z.string(),
+    type: z.literal("classify_progress"),
+    event: z.enum([
+      "classify_started",
+      "clip_classified",
+      "clip_skipped",
+      "clip_error",
+      "classify_complete",
+    ]),
+    file: z.string().optional(),
+    label: ClassifyLabelSchema.optional(),
+    duration_sec: z.number().optional(),
+    face_ratio: z.number().optional(),
+    motion_score: z.number().optional(),
+    resolve_ok: z.boolean().nullable().optional(),
+    sidecar_ok: z.boolean().nullable().optional(),
+    reason: z.string().optional(),
+    total_clips: z.number().optional(),
+    a_roll: z.number().optional(),
+    b_roll: z.number().optional(),
+    ambiguous: z.number().optional(),
+    skipped: z.number().optional(),
+    total: z.number().optional(),
+  }),
+  // Classify complete — final; resolves the call
+  z.object({
+    id: z.string(),
+    type: z.literal("classify_complete"),
+    event: z.string(),
+    a_roll: z.number(),
+    b_roll: z.number(),
+    ambiguous: z.number(),
+    skipped: z.number(),
+    total: z.number(),
+  }),
+  // Classify confirm ok — final; resolves the call
+  z.object({
+    id: z.string(),
+    type: z.literal("classify_confirm_ok"),
+    clip_path: z.string(),
+    label: ClassifyLabelSchema,
+    resolve_ok: z.boolean(),
+  }),
+  // Build timeline result — final; resolves the call
+  z.object({
+    id: z.string(),
+    type: z.literal("build_timeline_result"),
+    ok: z.boolean(),
+    name: z.string().nullable(),
+    fps: z.number().nullable(),
+    resolution: z.string().nullable(),
+    a_count: z.number(),
+    b_count: z.number(),
+    ambiguous_count: z.number(),
+    missing_paths: z.array(z.string()),
+    warnings: z.array(z.string()),
+    error: z.string().nullable(),
+  }),
 ]);
 
 export type OutboundMessage = z.infer<typeof OutboundMessageSchema>;
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type IngestProgressEvent = Extract<InboundMessage, { type: "ingest_progress" }>;
 export type IngestCompleteEvent = Extract<InboundMessage, { type: "ingest_complete" }>;
+export type ClassifyProgressEvent = Extract<InboundMessage, { type: "classify_progress" }>;
+export type ClassifyCompleteEvent = Extract<InboundMessage, { type: "classify_complete" }>;
+export type BuildTimelineResultEvent = Extract<InboundMessage, { type: "build_timeline_result" }>;
 
 // Caller-facing type: OutboundMessage without the `id` field (bridge adds it).
 export type OutboundCall =
@@ -107,15 +198,39 @@ export type OutboundCall =
         write_sidecar?: boolean;
         resolve?: boolean;
       };
+    }
+  | {
+      type: "classify";
+      payload: {
+        path: string;
+        dry_run?: boolean;
+      };
+    }
+  | {
+      type: "classify_confirm";
+      payload: {
+        clip_path: string;
+        label: z.infer<typeof ClassifyLabelSchema>;
+        shoot_folder: string;
+      };
+    }
+  | {
+      type: "build_timeline";
+      payload: {
+        path: string;
+        name?: string;
+      };
     };
 
 // ── Bridge ───────────────────────────────────────────────────────────────────
+
+type ProgressEvent = IngestProgressEvent | ClassifyProgressEvent;
 
 type PendingCall = {
   resolve: (value: InboundMessage) => void;
   reject: (reason: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
-  onProgress?: (event: IngestProgressEvent) => void;
+  onProgress?: (event: ProgressEvent) => void;
 };
 
 export class PythonBridge {
@@ -199,14 +314,14 @@ export class PythonBridge {
    */
   async stream(
     msg: OutboundCall,
-    onProgress: (event: IngestProgressEvent) => void,
+    onProgress: (event: ProgressEvent) => void,
   ): Promise<InboundMessage> {
     return this._send(msg, onProgress);
   }
 
   private _send(
     msg: OutboundCall,
-    onProgress?: (event: IngestProgressEvent) => void,
+    onProgress?: (event: ProgressEvent) => void,
   ): Promise<InboundMessage> {
     const proc = this.proc;
     if (!this.isRunning || proc === null) {
@@ -258,13 +373,20 @@ export class PythonBridge {
     }
 
     // Progress events — call callback, do not resolve the promise yet
-    if (msg.type === "ingest_progress") {
-      pending.onProgress?.(msg);
+    if (msg.type.endsWith("_progress")) {
+      pending.onProgress?.(msg as ProgressEvent);
       return;
     }
 
     clearTimeout(pending.timeoutHandle);
     this.pending.delete(msg.id);
+
+    // Error events — reject the promise so callers catch rather than silently receive an error object
+    if (msg.type === "error") {
+      pending.reject(new Error(msg.message));
+      return;
+    }
+
     pending.resolve(msg);
   }
 }

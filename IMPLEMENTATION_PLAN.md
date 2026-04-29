@@ -1,8 +1,26 @@
-# IMPLEMENTATION PLAN — Session 1: Project Bootstrap
+# IMPLEMENTATION PLAN
+
+## Scope (post April-2026 reset)
+
+The product is **four steps**, not nine. Story-assistant features are out of
+scope. See `~/.claude/projects/-Users-aidanmascaro-Documents-Cairn/memory/feedback_scope_reset.md`.
+
+1. **Ingest** — drag folder → organise on disk → import to Resolve bins ✅
+2. **Classify** — vision-based KNN (face detection + motion score), with
+   per-clip ambiguous review in the UI ✅
+3. **Color-code** — write Keywords + SetClipColor in the Resolve media pool ✅
+   (handled inline by `resolve_api.classify_write_resolve`)
+4. **Build assembly timeline** — new timeline at modal resolution/fps;
+   A-roll on V1/A1, B-roll on V2/A2; ambiguous skipped ✅
+
+Anything in older sessions that mentions transcribe, brief, soundbites,
+matching, or sidebar is **out of scope** — preserved below for archival.
 
 ## Session Goal
 
-Establish repository structure, harness documents, per-stage specs, and plugin skeleton so Session 2 can begin implementing Stage 1 (ingest) against a working Electron + Python bridge.
+Originally: establish repository structure, harness documents, per-stage specs,
+and plugin skeleton so Session 2 can begin implementing Stage 1 (ingest)
+against a working Electron + Python bridge.
 
 ---
 
@@ -442,15 +460,234 @@ See `specs/sidebar.md` for full detail.
 
 ## Carry-Forward / Backlog
 
-- Stage 1 close-out (bin structure live test, rebuild) — Session 3 pre-flight ← current
-- Stage 2 (classify — Silero VAD integration) — Session 3
-- Stage 3 (transcribe — AssemblyAI client + Whisper fallback) — Session 4
-- Stage 4 (vision — frame extraction + Claude vision tagging) — Session 5
-- Stage 5 (brief — conversational panel) — Session 6
-- Stage 6 (soundbites — selection + markers) — Session 7
-- Stage 7 (matching — literal + thematic B-roll pairing) — Session 8
-- Stage 8 (sidebar — cockpit UI) — Session 9
-- Packaging + code signing (Mac notarisation, Windows cert) — Session 10
+### Active (post scope-reset)
+
+- Stage 1 (ingest — folder organise + Resolve bin import) ✅ shipped
+- Stage 2 (classify — vision KNN: face_ratio + motion_score) ✅ shipped
+  - Color-code: ✅ (`resolve_api.classify_write_resolve`)
+  - Ambiguous review UI: ✅ (`ClassifyPanel.svelte`)
+- Stage 4 (assembly timeline — A-roll V1/A1, B-roll V2/A2) ✅ shipped this session
+- Packaging + code signing (Mac notarisation, Windows cert) — pending
+
+### Iteration ideas (not committed)
+
+- Classify: add VAD as a tiebreaker for AMBIGUOUS clips (per scope-reset
+  memory: "transcription as tiebreaker"). Only run when classifier
+  confidence is < threshold.
+- Classify: extend ground-truth bootstrap UX so users can label faster.
+- Timeline: option to put AMBIGUOUS on V3 instead of skipping.
+- Timeline: snap A-roll and B-roll start frames so B-roll aligns with A-roll
+  on the timeline rather than starting at frame 0 of V2.
+
+### Out of scope (DO NOT BUILD)
+
+- Transcription for captions / SRT subtitle export
+- Soundbite identification + markers
+- Conversational project brief
+- B-roll → soundbite matching
+- Story-map sidebar cockpit
+
+---
+
+---
+
+## Session 11: Harness Polish + Silent Failure Remediation
+
+All four product stages are code-complete. This session closes every silent failure found by the `silent-failure-hunter` audit, surfaces those failures in the UI, tightens the type contract so `svelte-check` catches future gaps, and adds a formal eval harness for the KNN classifier.
+
+Work top-to-bottom. Each task must leave sensors green before moving to the next.
+
+---
+
+### Task 1: Verify `type: "error"` rejects streaming promises correctly
+
+**Why first:** If the bridge doesn't convert `type: "error"` into a promise rejection for streaming calls, every other fix that raises an exception in a streaming handler becomes a hang instead of a visible error.
+
+- [ ] Read `src/orchestrator/python-bridge.ts` `handleLine()` — confirm `type: "error"` for a streaming call (one that has `onProgress`) triggers `pending.reject()` not `pending.resolve()`
+- [ ] Write a Vitest test: mock a Python process that sends a `type: "error"` mid-stream → assert `stream()` rejects, not resolves
+- [ ] Fix if `type: "error"` is currently calling `pending.resolve()` instead of `pending.reject()` (check the `msg.type.endsWith("_progress")` branch and the final `pending.resolve(msg)` path)
+- [ ] `npm run test` green
+
+---
+
+### Task 2: Tighten `ClassifyProgressEvent` to a discriminated union
+
+**Why before UI fixes:** `svelte-check` can only flag unhandled event branches if the `event` field is a string literal union, not `string`. Tightening the type first means the Svelte fix in Task 3 is type-checked automatically at the Stop gate.
+
+- [ ] In `src/ui/types.ts`, change `ClassifyProgressEvent.event` from `string` to:
+
+  ```typescript
+  event: "classify_started" |
+    "clip_classified" |
+    "clip_skipped" |
+    "clip_error" |
+    "classify_complete";
+  ```
+
+- [ ] Confirm `classify.py` only emits those five event strings (grep `"event":` in classify.py — must be an exact subset)
+- [ ] In `src/orchestrator/python-bridge.ts`, narrow `classify_progress.event` to the same literal union in the Zod schema
+- [ ] `npm run typecheck` green — svelte-check will now flag any Svelte template branch that doesn't handle `clip_error`
+
+---
+
+### Task 3: Surface `clip_error` and `resolve_ok: false` in `ClassifyPanel.svelte`
+
+**Why:** Both are currently invisible to the user. A corrupt clip or a Resolve write failure looks identical to a successful classification.
+
+- [ ] Read `src/ui/ClassifyPanel.svelte` fully before editing
+- [ ] Add `clip_error` branch to the progress event handler:
+  - Increment a reactive `errorCount` counter
+  - Push `{ file, reason }` into a reactive `clipErrors: Array<{file:string, reason:string}>` list
+- [ ] Add `resolve_fail` tracking:
+  - In the `clip_classified` branch, check `ev.resolve_ok === false` and increment `resolveFailCount`
+- [ ] Update the completion summary line to show warnings when non-zero:
+  - `"⚠ N clips could not be read by ffprobe"` (errorCount > 0)
+  - `"⚠ N clips not updated in Resolve"` (resolveFailCount > 0)
+  - `"⚠ N clips not saved to sidecar"` (sidecarFailCount > 0, using `ev.sidecar_ok === false`)
+- [ ] Add a collapsible error detail panel showing `clipErrors` file paths + reasons (only when errorCount > 0)
+- [ ] `npx svelte-check --tsconfig tsconfig.json` must exit 0 — no unhandled event discriminant warnings
+
+---
+
+### Task 4: Fix `timeline.py` — surface `SetTrackLock` failures as warnings
+
+**Why:** `contextlib.suppress(RuntimeError, TypeError)` on `SetTrackLock` means B-roll can silently land on V1 alongside A-roll if track locking fails. The user sees a correctly-named timeline that is structurally wrong.
+
+- [ ] Read `src/workers/timeline.py` lines 145–175 (`_set_track_lock_safely`, `_add_track_safely`)
+- [ ] Replace `contextlib.suppress` with explicit try/except that appends to `warnings` on failure:
+
+  ```python
+  try:
+      fn(track_type, index, locked)
+  except (RuntimeError, TypeError) as exc:
+      warnings.append(f"SetTrackLock({track_type}, {index}) failed: {exc} — track may be unlocked")
+  ```
+
+- [ ] Verify `warnings` list is available in scope at the call site (it is — it's defined earlier in `build_timeline`)
+- [ ] `pytest tests/python/ -x -q` green
+
+---
+
+### Task 5: Fix `ingest.py` — emit event on silent rename skip
+
+**Why:** When a destination folder already exists, the rename is silently skipped but a `renamed` event is yielded with the old name. Node thinks the rename happened.
+
+- [ ] Read `src/workers/ingest.py` lines 420–445 (folder rename logic)
+- [ ] When `dest.exists()` prevents rename, yield a distinct event instead:
+
+  ```python
+  if not dry_run and not dest.exists():
+      folder.rename(dest)
+      folder = dest
+      yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": dry_run}
+  elif dry_run:
+      folder = dest
+      yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": dry_run}
+  else:
+      yield {
+          "event": "rename_skipped",
+          "from": current,
+          "intended": dest.name,
+          "reason": "destination already exists",
+      }
+  ```
+
+- [ ] Add `rename_skipped` to `IngestProgressEvent` in `src/ui/types.ts` (the `event` field is still `string` for ingest — no discriminated union change needed here yet)
+- [ ] `pytest tests/python/ -x -q` green
+
+---
+
+### Task 6: Fix `resolve_api.py` — atomic marker update
+
+**Why:** `update_marker_note` deletes the marker before attempting `AddMarker`. If `AddMarker` fails, the original marker is permanently destroyed. This is a data-loss bug.
+
+- [ ] Read `src/workers/resolve_api.py` lines 595–625 (`update_marker_note`)
+- [ ] Rewrite to attempt `AddMarker` first before deleting:
+
+  ```python
+  # store original, delete, re-add, restore on failure
+  original = clip.GetMarkers().get(frame_id)
+  if original is None:
+      return False
+  clip.DeleteMarkerAtFrame(frame_id)
+  result = clip.AddMarker(frame_id, color, name, note, duration, custom_data)
+  if not result:
+      # Restore original marker
+      clip.AddMarker(
+          frame_id,
+          original.get("color", "Blue"),
+          original.get("name", ""),
+          original.get("note", ""),
+          original.get("duration", 1),
+          original.get("customData", ""),
+      )
+      return False
+  return True
+  ```
+
+- [ ] `pytest tests/python/ -x -q` green
+
+---
+
+### Task 7: Add KNN classifier eval harness
+
+**Why:** The KNN classifier is the core product decision-maker. Right now there are no evals measuring accuracy across different ground-truth sizes or edge cases. Using the `eval-harness` skill pattern: define capability evals that run as part of `pytest`, measure pass@k, and detect regressions when the classifier changes.
+
+- [ ] Create `tests/python/test_classifier_evals.py`:
+
+  ```python
+  # CAPABILITY EVAL: knn-classifier-accuracy
+  # Task: KNN classifies A-ROLL / B-ROLL correctly with N labelled examples
+  # Success criteria:
+  #   - 10 examples, 5+5 balanced: correct on pure A-ROLL and pure B-ROLL queries
+  #   - 20 examples, 10+10: AMBIGUOUS query (face=0.5, motion=0.5) → AMBIGUOUS
+  #   - 5 examples (below min): falls back to rule-based, no KNN called
+  #   - Empty GT: rule-based, face_ratio>=0.7 → A-ROLL, else B-ROLL
+  ```
+
+- [ ] Parametrize with `pytest.mark.parametrize` over GT sizes: 0, 3, 5, 10, 20 examples
+- [ ] Add regression test: given a fixed GT snapshot (`tests/python/fixtures/gt_snapshot.json`), accuracy must be ≥ 90% on a held-out 20-clip test set (also fixed in fixtures)
+- [ ] Create `tests/python/fixtures/gt_snapshot.json` — 40 synthetic examples (20 A-ROLL: face_ratio 0.6–0.9, motion 0.0–0.05; 20 B-ROLL: face_ratio 0.0–0.1, motion 0.05–0.3)
+- [ ] Create `tests/python/fixtures/held_out_clips.json` — 20 clips with known ground truth labels
+- [ ] `pytest tests/python/test_classifier_evals.py -v` green
+
+---
+
+### Task 8: Plugin rebuild + live verification
+
+Closes all four open items in `fix_plan.md` from Session 2.
+
+- [ ] Rebuild: `sudo chown -R $(whoami) dist && npm run build:ui && sudo bash packaging/install-dev-plugin.sh`
+- [ ] Restart Resolve; open an existing project
+- [ ] **Verify bin structure:** run ingest on an organised folder → confirm `<shoot>/01_VIDEOS/A_CAM/`, `/C_CAM/`, `/02_PHOTOS/` bins appear in media pool
+- [ ] **Verify Photomator files:** confirm `DSC00816`-style extension-less files land in `02_PHOTOS`
+- [ ] **Verify empty shells:** confirm `DCIM`, `M4ROOT`, `drone` source-camera folders are trashed
+- [ ] **Verify classify:** run classify → confirm all clips get A-ROLL/B-ROLL/AMBIGUOUS colours in media pool; check `resolve_ok` warnings appear in UI for any failures
+- [ ] Mark all four `fix_plan.md` items Resolved
+
+---
+
+### Task 9: Sensors green + commit
+
+- [ ] `npm run typecheck` → 0 errors
+- [ ] `npx svelte-check --tsconfig tsconfig.json` → 0 errors
+- [ ] `python3 -m pyrefly check src/workers/` → 0 errors
+- [ ] `python3 -m pytest tests/python/ -x -q` → all pass (including new eval tests)
+- [ ] `npm run test` → all pass (including new streaming-error rejection test)
+- [ ] Update `fix_plan.md`: mark Session 2 items Resolved, add any new findings from live verification
+- [ ] Commit: `fix: silent failure remediation — clip_error UI, resolve_ok surface, marker atomicity, track lock warnings`
+
+---
+
+### Session 11 Success Criteria
+
+1. A corrupt clip during classify shows `"⚠ 1 clip could not be read"` in the UI — not silent disappearance
+2. A Resolve write failure during classify shows `"⚠ N clips not updated in Resolve"` — not silent success
+3. `svelte-check` at Stop gate catches any future unhandled `ClassifyProgressEvent` branch
+4. `build_timeline_result.warnings` includes a message if `SetTrackLock` failed — timeline structure is transparent
+5. Marker update is safe: if `AddMarker` fails after `DeleteMarkerAtFrame`, the original marker is restored
+6. KNN eval suite: 97 existing tests + new eval tests all pass; accuracy on fixture set ≥ 90%
+7. All four `fix_plan.md` items from Session 2 marked Resolved after live plugin smoke-test
 
 ---
 

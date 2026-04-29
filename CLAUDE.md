@@ -207,6 +207,19 @@ cairn/
 | **Desktop Commander** | `mcp__Desktop_Commander__*` | Shell access, running tests, git                                  |
 | **context7**          | `mcp__context7__*`          | Up-to-date docs for Electron, Svelte, Resolve API, AssemblyAI SDK |
 | **GitHub**            | `mcp__github__*`            | Issues, PRs, releases                                             |
+| **DaVinci Resolve**   | `mcp__davinci-resolve__*`   | Dev-time Resolve verification; NOT available to plugin at runtime |
+
+### Using the DaVinci Resolve MCP
+
+**This is the most powerful dev-time tool in the harness.** Use it to verify every Resolve operation before asking the user to test live.
+
+- **Before any Resolve API change:** verify current state with `folder.get_subfolders`, `folder.get_clips`, `timeline.list`, `project_settings.get_setting`
+- **After any bin/import operation:** confirm structure with `folder.get_subfolders(path)` using path strings like `"Master/shoot/01_VIDEOS"`
+- **After classify write:** confirm with `media_pool_item.get_clip_color(clip_id)` and `get_metadata(clip_id)`
+- **After timeline assembly:** confirm track counts with `timeline.get_track_count("video")` and `get_track_count("audio")`
+- **Testing bin creation:** create under `Master/_cairn_test`, verify, delete with `media_pool.delete_folders([id])` — never pollute user project with test data
+- **Important:** `resolve_control.launch()` auto-launches Resolve if not running (wait up to 60s). Call `get_version()` at session start to confirm connection.
+- **Confirmed enabled:** External Scripting is enabled on this machine (MCP works ↔ scripting works ↔ `resolve_import.py` subprocess will connect successfully).
 
 ### Using context7
 
@@ -264,3 +277,71 @@ Never commit `.env.local`, `.env.development`, or any file with API keys.
 - Tag releases at the end of each completed stage: `v0.1.0` after Stage 1, `v0.2.0` after Stage 2, etc.
 - Never `git push` without explicit user instruction
 - Never `git reset --hard` or `git rebase -i` without confirmation
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
+- Rebuild the full graph (with semantic extraction) only when docs/specs change: `/graphify . --update`
+- Query the graph to find cross-cutting concerns before touching shared code: `/graphify query "resolve api"`, `/graphify path "classify" "timeline"`
+
+---
+
+## Everything Claude Code (ECC) — Agent & Quality Gate Integration
+
+ECC agents and rules are installed globally at `~/.claude/agents/` and `~/.claude/rules/`. Use them proactively — do not wait to be asked.
+
+### Mandatory Agent Usage
+
+| Trigger                                        | Agent to use                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| After writing or editing any TypeScript/Svelte | `typescript-reviewer`                                                   |
+| After writing or editing any Python worker     | `python-reviewer`                                                       |
+| Before any commit                              | `security-reviewer`                                                     |
+| When a build or typecheck fails                | `build-error-resolver`                                                  |
+| When implementing a new feature or test        | `tdd-guide`                                                             |
+| When making architectural decisions            | `architect`                                                             |
+| After editing any Python worker                | `silent-failure-hunter` — catches swallowed errors in IPC/Resolve calls |
+| After significant perf work (classify, ingest) | `performance-optimizer` — ffprobe batching, KNN memory                  |
+| When harness feels slow or noisy               | `harness-optimizer` — tune `.claude/settings.json` hooks                |
+
+### Key Skills Available
+
+| Skill                | When to invoke                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `/tdd-workflow`      | Writing new workers, handlers, or UI logic                                                                               |
+| `/security-review`   | Before any release or after touching key storage/IPC                                                                     |
+| `/backend-patterns`  | Designing new Python worker interfaces                                                                                   |
+| `/e2e-testing`       | Adding Playwright tests for UI flows                                                                                     |
+| `/verification-loop` | Pre-release full pipeline smoke test                                                                                     |
+| `/graphify`          | After large refactors to rebuild the knowledge graph                                                                     |
+| `/video-editing`     | When writing FFmpeg commands, batch cut scripts, or Whisper pipelines — contains exact patterns for the tools Cairn uses |
+| `/eval-harness`      | When writing capability evals for the KNN classifier or LLM-as-judge loops — formalises pass@k and regression tracking   |
+
+### Slash Commands Available
+
+| Command                                          | When to use                                                                                  |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `/code-review`                                   | Before any PR — runs 4 parallel agents with ≥80 confidence filtering, posts GitHub comment   |
+| `/commit`                                        | Quick conventional commit with auto-generated message                                        |
+| `/revise-claude-md`                              | End of session — captures learnings from current session into CLAUDE.md                      |
+| `/ralph-loop "task" --completion-promise "DONE"` | Long autonomous fix cycles (e.g. "run pytest and fix all failures. Output DONE when green.") |
+
+### Quality Gates (auto-wired in `.claude/settings.json`)
+
+These run automatically — do not bypass them:
+
+- **On every TypeScript/Svelte edit** → ESLint auto-fix
+- **On every Python edit** → Ruff auto-fix
+- **At session end** → `npm run typecheck` + `pyrefly check src/workers/`
+
+If any gate fails, fix it before marking the task complete. Never `// @ts-ignore` or `# type: ignore` to silence — diagnose and fix the root cause.
+
+### TypeScript Language Server (typescript-lsp)
+
+The typescript-lsp plugin is installed globally. Use **go-to-definition** and **find-references** to navigate the IPC contract between `src/ui/types.ts`, `src/orchestrator/python-bridge.ts`, and `src/orchestrator/main.js` before editing shared types — it prevents the silent-breakage pattern where a type change doesn't surface until runtime.

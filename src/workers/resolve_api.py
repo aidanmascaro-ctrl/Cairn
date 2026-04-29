@@ -164,7 +164,10 @@ def import_clips(
         return []
 
     # Set active bin so ImportMedia puts clips in the right place
-    media_pool.SetCurrentFolder(bin_folder)
+    if not media_pool.SetCurrentFolder(bin_folder):
+        raise RuntimeError(
+            f"SetCurrentFolder failed for bin {bin_folder.GetName()!r} — clips would land in wrong bin"
+        )
 
     existing_paths = {
         item.GetClipProperty("File Path") for item in bin_folder.GetClipList() if item is not None
@@ -238,12 +241,11 @@ def ingest_into_resolve(
         pm = resolve.GetProjectManager()
 
         folder = Path(shoot_folder)
-        shoot_name = folder.name
         project = pm.GetCurrentProject()
         if project is None:
-            project = pm.CreateProject(shoot_name)
-        if project is None:
-            raise ResolveUnavailableError("Could not open or create a Resolve project.")
+            raise ResolveUnavailableError(
+                "No DaVinci Resolve project is open. Open a project before ingesting."
+            )
 
         mp = project.GetMediaPool()
         bins = build_bin_tree(mp)
@@ -328,11 +330,11 @@ _LABEL_COLOR: dict[str, str] = {
 }
 
 
-def set_clip_color(clip: Any, color: str) -> None:
-    """Set clip colour via SetClipColor. Raises ValueError for unknown colors."""
+def set_clip_color(clip: Any, color: str) -> bool:
+    """Set clip colour via SetClipColor. Returns True on success."""
     if color not in VALID_CLIP_COLORS:
         raise ValueError(f"Invalid clip color {color!r}. Valid values: {sorted(VALID_CLIP_COLORS)}")
-    clip.SetClipColor(color)
+    return bool(clip.SetClipColor(color))
 
 
 def _search_folder(folder: Any, file_path: str) -> Any | None:
@@ -372,9 +374,7 @@ def classify_write_resolve(clip_path: str, label: str) -> bool:
             return False
         set_clip_metadata(clip, {"Keywords": label})
         color = _LABEL_COLOR.get(label)
-        if color:
-            set_clip_color(clip, color)
-        return True
+        return not (color and not set_clip_color(clip, color))
     except ResolveUnavailableError:
         return False
     finally:
@@ -613,7 +613,18 @@ def update_marker_note(clip_path: str, frame_id: int, matches_line: str) -> bool
             marker.get("duration", 1),
             marker.get("customData", ""),
         )
-        return bool(result)
+        if not result:
+            # Restore original marker to avoid permanent data loss
+            clip.AddMarker(
+                frame_id,
+                marker.get("color", "Lemon"),
+                marker.get("name", ""),
+                old_note,
+                marker.get("duration", 1),
+                marker.get("customData", ""),
+            )
+            return False
+        return True
     except ResolveUnavailableError:
         return False
     finally:

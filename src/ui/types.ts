@@ -1,5 +1,13 @@
 // Shape of the `window.cairn` bridge exposed by src/orchestrator/preload.js.
 // Keep in sync with preload.js and the handlers registered in main.js.
+//
+// IPC contract — each interface maps to a Python handler in src/workers/bridge.py:
+//   IngestPayload / IngestResult        → handle_ingest()   (streaming)
+//   ClassifyPayload / ClassifyResult    → handle_classify() (streaming)
+//   ClassifyConfirmPayload / Result     → handle_classify_confirm()
+//   BuildTimelinePayload / Result       → handle_build_timeline()
+//
+// Zod schemas mirroring these types live in src/orchestrator/python-bridge.ts.
 
 export interface ResolveSnapshot {
   available: boolean;
@@ -105,13 +113,20 @@ export interface ClassifyPayload {
 }
 
 export interface ClassifyProgressEvent {
-  event: "classify_started" | "clip_classified" | "clip_skipped" | "classify_complete";
+  event:
+    | "classify_started"
+    | "clip_classified"
+    | "clip_skipped"
+    | "clip_error"
+    | "classify_complete";
   file?: string;
   label?: ClassifyLabel;
   duration_sec?: number;
   face_ratio?: number;
   motion_score?: number;
   resolve_ok?: boolean | null;
+  sidecar_ok?: boolean | null;
+  reason?: string;
   total_clips?: number;
   // summary fields (classify_complete)
   a_roll?: number;
@@ -146,11 +161,57 @@ export interface ClassifyConfirmResult {
   resolve_ok: boolean;
 }
 
+export interface ClassifyInspectFrame {
+  frame_idx: number;
+  timestamp_sec: number;
+  face_count: number;
+  motion_diff: number;
+  data_url: string;
+}
+
+export interface ClassifyInspectResult {
+  ok: boolean;
+  duration_sec: number;
+  face_ratio: number;
+  motion_score: number;
+  knn_label: ClassifyLabel | null;
+  knn_confidence: number | null;
+  frames: ClassifyInspectFrame[];
+  error: string | null;
+}
+
+export interface ClassifyInspectPayload {
+  clip_path: string;
+}
+
 export interface ClassifyApi {
   run(payload: ClassifyPayload): Promise<ClassifyResult>;
   onProgress(callback: (event: ClassifyProgressEvent) => void): () => void;
   thumbnail(clipPath: string): Promise<ThumbnailResult>;
   confirm(payload: ClassifyConfirmPayload): Promise<ClassifyConfirmResult>;
+  inspect(payload: ClassifyInspectPayload): Promise<ClassifyInspectResult>;
+}
+
+export interface BuildTimelinePayload {
+  path: string;
+  name?: string;
+}
+
+export interface BuildTimelineResult {
+  ok: boolean;
+  name: string | null;
+  fps: number | null;
+  resolution: string | null;
+  a_count: number;
+  b_count: number;
+  ambiguous_count: number;
+  missing_paths: string[];
+  warnings: string[];
+  error: string | null;
+}
+
+export interface TimelineApi {
+  build(payload: BuildTimelinePayload): Promise<BuildTimelineResult>;
 }
 
 export interface CairnBridge {
@@ -160,5 +221,6 @@ export interface CairnBridge {
   echo(payload: string): Promise<EchoResult>;
   ingest: IngestApi;
   classify: ClassifyApi;
+  timeline: TimelineApi;
   keys: KeysApi;
 }

@@ -1,0 +1,65 @@
+{
+  "_comment": "Held-out evaluation set — clips NOT in gt_snapshot.json, with known labels verified by hand.",
+  "clips": [
+    {
+      "id": "ho_aroll_01",
+      "label": "A-ROLL",
+      "duration_sec": 45.0,
+      "features": { "face_ratio": 1.0, "motion_score": 0.014 }
+    },
+    {
+      "id": "ho_aroll_02",
+      "label": "A-ROLL",
+      "duration_sec": 62.0,
+      "features": { "face_ratio": 0.8, "motion_score": 0.019 }
+    },
+    {
+      "id": "ho_aroll_03",
+      "label": "A-ROLL",
+      "duration_sec": 30.0,
+      "features": { "face_ratio": 0.8, "motion_score": 0.028 }
+    },
+    {
+      "id": "ho_aroll_04",
+      "label": "A-ROLL",
+      "duration_sec": 88.0,
+      "features": { "face_ratio": 1.0, "motion_score": 0.011 }
+    },
+    {
+      "id": "ho_aroll_05",
+      "label": "A-ROLL",
+      "duration_sec": 55.0,
+      "features": { "face_ratio": 0.8, "motion_score": 0.033 }
+    },
+    {
+      "id": "ho_broll_01",
+      "label": "B-ROLL",
+      "duration_sec": 12.0,
+      "features": { "face_ratio": 0.0, "motion_score": 0.19 }
+    },
+    {
+      "id": "ho_broll_02",
+      "label": "B-ROLL",
+      "duration_sec": 8.0,
+      "features": { "face_ratio": 0.0, "motion_score": 0.11 }
+    },
+    {
+      "id": "ho_broll_03",
+      "label": "B-ROLL",
+      "duration_sec": 20.0,
+      "features": { "face_ratio": 0.0, "motion_score": 0.28 }
+    },
+    {
+      "id": "ho_broll_04",
+      "label": "B-ROLL",
+      "duration_sec": 15.0,
+      "features": { "face_ratio": 0.0, "motion_score": 0.065 }
+    },
+    {
+      "id": "ho_broll_05",
+      "label": "B-ROLL",
+      "duration_sec": 10.0,
+      "features": { "face_ratio": 0.0, "motion_score": 0.13 }
+    }
+  ]
+}

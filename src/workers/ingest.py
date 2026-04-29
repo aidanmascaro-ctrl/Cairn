@@ -312,7 +312,16 @@ def move_files(
         if src == dst:
             continue
         if not dry_run:
-            shutil.move(str(src), str(dst))
+            try:
+                shutil.move(str(src), str(dst))
+            except OSError as exc:
+                yield {
+                    "event": "file_move_failed",
+                    "src": str(src),
+                    "dst": str(dst),
+                    "reason": str(exc),
+                }
+                continue
         yield {
             "event": "file_moved",
             "src": str(src),
@@ -369,8 +378,8 @@ def remove_empty_shells(folder: Path, dry_run: bool = False) -> int:
                 # Windows Recycle Bin correctly — no manual ~/.Trash needed
                 send2trash(str(dp))
                 count += 1
-            except Exception:  # send2trash raises OSError or TrashPermissionError
-                pass
+            except Exception as exc:  # send2trash raises OSError or TrashPermissionError
+                print(f"[ingest.py] Could not trash {dp}: {exc}", file=sys.stderr)
     return count
 
 
@@ -422,22 +431,38 @@ def run(
         shoot_name = name_override or current
         new_name = f"{meta['shoot_date']} {shoot_name}"
         dest = folder.parent / new_name
-        if not dry_run and not dest.exists():
+        if dry_run:
+            folder = dest
+            yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": True}
+        elif not dest.exists():
             folder.rename(dest)
             folder = dest
-        elif dry_run:
-            folder = dest  # logical rename for progress reporting
-        yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": dry_run}
+            yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": False}
+        else:
+            yield {
+                "event": "rename_skipped",
+                "from": current,
+                "to": new_name,
+                "reason": "destination already exists",
+            }
     elif name_override:
         date_prefix = current[:6]
         new_name = f"{date_prefix} {name_override}"
         dest = folder.parent / new_name
-        if not dry_run and not dest.exists():
+        if dry_run:
+            folder = dest
+            yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": True}
+        elif not dest.exists():
             folder.rename(dest)
             folder = dest
-        elif dry_run:
-            folder = dest
-        yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": dry_run}
+            yield {"event": "renamed", "from": current, "to": folder.name, "dry_run": False}
+        else:
+            yield {
+                "event": "rename_skipped",
+                "from": current,
+                "to": new_name,
+                "reason": "destination already exists",
+            }
 
     # ── Template dirs ─────────────────────────────────────────────────────────
     for rel in TEMPLATE_DIRS:

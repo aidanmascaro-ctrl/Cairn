@@ -182,11 +182,11 @@ class TestCountFaceFrames:
 
 
 class TestGetDuration:
-    def test_returns_zero_on_nonzero_returncode(self):
+    def test_returns_none_on_nonzero_returncode(self):
         mock_proc = MagicMock()
         mock_proc.returncode = 1
         with patch("subprocess.run", return_value=mock_proc):
-            assert classify.get_duration("/fake/clip.mp4") == 0.0
+            assert classify.get_duration("/fake/clip.mp4") is None
 
     def test_parses_duration_from_ffprobe_json(self):
         import json
@@ -206,9 +206,9 @@ class TestGetDuration:
         with patch("subprocess.run", return_value=mock_proc):
             assert classify.get_duration("/fake/clip.mp4") == 0.0
 
-    def test_returns_zero_on_exception(self):
+    def test_returns_none_on_exception(self):
         with patch("subprocess.run", side_effect=OSError("no ffprobe")):
-            assert classify.get_duration("/fake/clip.mp4") == 0.0
+            assert classify.get_duration("/fake/clip.mp4") is None
 
 
 # ── scan_video_clips ──────────────────────────────────────────────────────────
