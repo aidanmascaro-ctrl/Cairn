@@ -53,6 +53,16 @@ contextBridge.exposeInMainWorld("cairn", {
     },
   },
 
+  timeline: {
+    /**
+     * Build the assembly timeline (Stage 4) — A-roll on V1/A1, B-roll on V2/A2.
+     * Skips AMBIGUOUS clips (the user must confirm them via the Classify panel first).
+     * @param {{ path: string, name?: string }} payload
+     * @returns {Promise<{ok: boolean, name: string|null, fps: number|null, resolution: string|null, a_count: number, b_count: number, ambiguous_count: number, missing_paths: string[], warnings: string[], error: string|null}>}
+     */
+    build: (payload) => ipcRenderer.invoke("cairn:timeline:build", payload),
+  },
+
   classify: {
     /**
      * Run classification on all video clips in a shoot folder.
@@ -81,6 +91,12 @@ contextBridge.exposeInMainWorld("cairn", {
      * @param {{ clip_path: string, label: string, shoot_folder: string }} payload
      */
     confirm: (payload) => ipcRenderer.invoke("cairn:classify:confirm", payload),
+    /**
+     * Re-analyse a clip and return annotated frame images for the visual inspector.
+     * Returns base64 JPEG data URLs with face boxes and motion bar overlaid.
+     * @param {{ clip_path: string }} payload
+     */
+    inspect: (payload) => ipcRenderer.invoke("cairn:classify:inspect", payload),
   },
 
   keys: {

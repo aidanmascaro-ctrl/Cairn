@@ -67,7 +67,7 @@
   });
 
   $: progressPct = total > 0 ? Math.round((processed / total) * 100) : 0;
-  $: pendingReview = ambiguousClips.filter((c) => c.confirmed === null).length;
+  $: pendingReview = ambiguousClips.length;
   $: dispatch("pendingChange", { count: pendingReview });
 
   async function runClassify() {
@@ -83,6 +83,7 @@
     resolveFailCount = 0;
     sidecarFailCount = 0;
     showErrorDetail = false;
+    resolvedCount = 0;
 
     const unsub = cairn.classify.onProgress((ev: ClassifyProgressEvent) => {
       if (ev.event === "classify_started") {
@@ -132,24 +133,19 @@
   }
 
   async function loadThumbnails() {
-    if (!cairn) return;
-    for (let i = 0; i < ambiguousClips.length; i++) {
-      const clip = ambiguousClips[i];
-      if (!clip) continue;
-      ambiguousClips = ambiguousClips.map((c, idx) =>
-        idx === i ? { ...c, thumbnailLoading: true } : c,
-      );
-      try {
-        const res = await cairn.classify.thumbnail(clip.path);
-        ambiguousClips = ambiguousClips.map((c, idx) =>
-          idx === i ? { ...c, thumbnailLoading: false, thumbnailUrl: res.dataUrl ?? null } : c,
-        );
-      } catch {
-        ambiguousClips = ambiguousClips.map((c, idx) =>
-          idx === i ? { ...c, thumbnailLoading: false, thumbnailError: true } : c,
-        );
+    const bridge = cairn;
+    if (!bridge) return;
+    ambiguousClips = ambiguousClips.map((c) => ({ ...c, thumbnailLoading: true }));
+    const results = await Promise.allSettled(
+      ambiguousClips.map((c) => bridge.classify.thumbnail(c.path)),
+    );
+    ambiguousClips = ambiguousClips.map((c, i) => {
+      const r = results[i];
+      if (r && r.status === "fulfilled" && r.value.dataUrl) {
+        return { ...c, thumbnailLoading: false, thumbnailUrl: r.value.dataUrl };
       }
-    }
+      return { ...c, thumbnailLoading: false, thumbnailError: true };
+    });
   }
 
   async function confirmClip(clipPath: string, label: ClassifyLabel) {
@@ -158,10 +154,22 @@
     if (idx === -1) return;
     ambiguousClips = ambiguousClips.map((c, i) => (i === idx ? { ...c, confirming: true } : c));
     try {
-      await cairn.classify.confirm({ clip_path: clipPath, label, shoot_folder: activeFolder });
-      ambiguousClips = ambiguousClips.map((c, i) =>
-        i === idx ? { ...c, confirmed: label, confirming: false } : c,
-      );
+      const result = await cairn.classify.confirm({
+        clip_path: clipPath,
+        label,
+        shoot_folder: activeFolder,
+      });
+      ambiguousClips = ambiguousClips.filter((c) => c.path !== clipPath);
+      resolvedCount++;
+      if (classifyResult) {
+        const key = label === "A-ROLL" ? "a_roll" : "b_roll";
+        classifyResult = {
+          ...classifyResult,
+          [key]: classifyResult[key] + 1,
+          ambiguous: classifyResult.ambiguous - 1,
+        };
+      }
+      if (!result.resolve_ok) resolveFailCount++;
     } catch {
       ambiguousClips = ambiguousClips.map((c, i) => (i === idx ? { ...c, confirming: false } : c));
     }
@@ -200,15 +208,10 @@
     resolveFailCount = 0;
     sidecarFailCount = 0;
     showErrorDetail = false;
+    resolvedCount = 0;
   }
 
-  function labelColor(label: ClassifyLabel | null): string {
-    if (label === "A-ROLL") return "badge-aroll";
-    if (label === "B-ROLL") return "badge-broll";
-    if (label === "AMBIGUOUS") return "badge-ambiguous";
-    return "";
-  }
-
+  let resolvedCount = 0;
   let inspectingPath: string | null = null;
 
   function toggleInspect(path: string): void {
@@ -288,15 +291,11 @@
 
     {#if ambiguousClips.length > 0}
       <div class="review-header">
-        <h3>
-          Review ambiguous clips {pendingReview > 0
-            ? `— ${String(pendingReview)} remaining`
-            : "— all resolved"}
-        </h3>
+        <h3>Review ambiguous clips — {String(pendingReview)} remaining</h3>
       </div>
       <div class="review-list">
         {#each ambiguousClips as clip (clip.path)}
-          <div class="review-item" class:resolved={clip.confirmed !== null}>
+          <div class="review-item">
             <div class="thumb-wrap">
               {#if clip.thumbnailUrl}
                 <img src={clip.thumbnailUrl} alt={clip.filename} class="thumb" />
@@ -316,26 +315,20 @@
                 )}
               </p>
               <div class="clip-actions">
-                {#if clip.confirmed !== null}
-                  <span class="badge {labelColor(clip.confirmed)}">{clip.confirmed}</span>
-                {:else}
-                  <div class="confirm-btns">
-                    <button
-                      class="btn-aroll"
-                      disabled={clip.confirming}
-                      on:click={() => confirmClip(clip.path, "A-ROLL")}
-                    >
-                      A-roll ▲
-                    </button>
-                    <button
-                      class="btn-broll"
-                      disabled={clip.confirming}
-                      on:click={() => confirmClip(clip.path, "B-ROLL")}
-                    >
-                      B-roll ▼
-                    </button>
-                  </div>
-                {/if}
+                <button
+                  class="btn-aroll"
+                  disabled={clip.confirming}
+                  on:click={() => confirmClip(clip.path, "A-ROLL")}
+                >
+                  A-roll ▲
+                </button>
+                <button
+                  class="btn-broll"
+                  disabled={clip.confirming}
+                  on:click={() => confirmClip(clip.path, "B-ROLL")}
+                >
+                  B-roll ▼
+                </button>
                 <button
                   class="inspect-toggle-btn"
                   on:click={() => {
@@ -353,6 +346,8 @@
           </div>
         {/each}
       </div>
+    {:else if resolvedCount > 0}
+      <p class="all-resolved">✓ All {String(resolvedCount)} ambiguous clips resolved</p>
     {/if}
 
     <button class="reset-btn" on:click={reset}>Re-classify</button>
@@ -551,10 +546,7 @@
     padding: 0.6rem 0.75rem;
     transition: border-color 0.15s;
   }
-  .review-item.resolved {
-    border-color: #1e3a1e;
-    opacity: 0.7;
-  }
+
   .thumb-wrap {
     flex-shrink: 0;
     width: 80px;
@@ -593,16 +585,12 @@
     font-size: 0.8rem;
     color: #7f7f82;
   }
-  .confirm-btns {
-    display: flex;
-    gap: 0.4rem;
-  }
-  .confirm-btns button {
+
+  .btn-aroll,
+  .btn-broll {
     padding: 0.25rem 0.6rem;
     font-size: 0.8rem;
     border-radius: 5px;
-    cursor: pointer;
-    border: 1px solid;
   }
   .btn-aroll {
     background: rgba(90, 140, 255, 0.15);
@@ -620,29 +608,11 @@
   .btn-broll:hover:not(:disabled) {
     background: rgba(80, 200, 120, 0.22);
   }
-  .confirm-btns button:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .badge {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-  }
-  .badge-aroll {
-    background: rgba(90, 140, 255, 0.2);
-    color: #8ab4ff;
-  }
-  .badge-broll {
-    background: rgba(80, 200, 120, 0.18);
+
+  .all-resolved {
+    font-size: 0.88rem;
     color: #7dd4a0;
-  }
-  .badge-ambiguous {
-    background: rgba(240, 190, 70, 0.18);
-    color: #f0c850;
+    margin: 0 0 1rem 0;
   }
   .reset-btn,
   button {

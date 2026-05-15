@@ -207,19 +207,21 @@ cairn/
 | **Desktop Commander** | `mcp__Desktop_Commander__*` | Shell access, running tests, git                                  |
 | **context7**          | `mcp__context7__*`          | Up-to-date docs for Electron, Svelte, Resolve API, AssemblyAI SDK |
 | **GitHub**            | `mcp__github__*`            | Issues, PRs, releases                                             |
-| **DaVinci Resolve**   | `mcp__davinci-resolve__*`   | Dev-time Resolve verification; NOT available to plugin at runtime |
+| **DaVinci Resolve**   | `mcp__resolve__*`           | Dev-time Resolve verification; NOT available to plugin at runtime |
 
 ### Using the DaVinci Resolve MCP
 
-**This is the most powerful dev-time tool in the harness.** Use it to verify every Resolve operation before asking the user to test live.
+**This is the most powerful dev-time tool in the harness.** Use it to verify every Resolve operation before asking the user to test live. The new `mcp__resolve__*` server (replacing the older `mcp__davinci-resolve__*`) exposes a flat tool surface (~200 tools, all prefixed `resolve_*`) with much richer coverage than before.
 
-- **Before any Resolve API change:** verify current state with `folder.get_subfolders`, `folder.get_clips`, `timeline.list`, `project_settings.get_setting`
-- **After any bin/import operation:** confirm structure with `folder.get_subfolders(path)` using path strings like `"Master/shoot/01_VIDEOS"`
-- **After classify write:** confirm with `media_pool_item.get_clip_color(clip_id)` and `get_metadata(clip_id)`
-- **After timeline assembly:** confirm track counts with `timeline.get_track_count("video")` and `get_track_count("audio")`
-- **Testing bin creation:** create under `Master/_cairn_test`, verify, delete with `media_pool.delete_folders([id])` — never pollute user project with test data
-- **Important:** `resolve_control.launch()` auto-launches Resolve if not running (wait up to 60s). Call `get_version()` at session start to confirm connection.
-- **Confirmed enabled:** External Scripting is enabled on this machine (MCP works ↔ scripting works ↔ `resolve_import.py` subprocess will connect successfully).
+- **Connection check:** `resolve_get_version` + `resolve_get_product_name` — call at session start.
+- **Before any Resolve API change:** verify current state with `resolve_list_bins`, `resolve_list_timelines`, `resolve_get_project_settings`, `resolve_get_timeline_info`.
+- **After any bin/import operation:** confirm structure with `resolve_list_bins` and `resolve_search_clips` for path-based lookups.
+- **After classify write:** confirm with `resolve_get_clip_info(clip_id)` (returns metadata + clip colour) or `resolve_inspect_item(clip_id)`.
+- **After timeline assembly:** confirm with `resolve_get_timeline_info` (track counts) and `resolve_list_clips_on_track(track_index, track_type)`.
+- **Marker writes (Stage 6 soundbites):** `resolve_add_marker_at` / `resolve_add_markers` / `resolve_list_markers` — these are now first-class tools.
+- **Pipeline-relevant bonus tools now available:** `resolve_clip_transcribe` (server-side AssemblyAI alternative for Stage 3), `resolve_detect_scene_cuts` (supplement classification), `resolve_smart_reframe`, `resolve_auto_sync_audio`, `resolve_build_from_markers` (assemble Stage 7 directly from marker timeline). Treat these as harness verification helpers, not as runtime substitutes — the shipped plugin must remain self-contained.
+- **Testing bin creation:** create under `Master/_cairn_test`, verify, delete with `resolve_delete_bins([id])` — never pollute user project with test data.
+- **Confirmed enabled:** External Scripting is enabled on this machine (MCP works ↔ scripting works ↔ `resolve_import.py` subprocess will also connect successfully).
 
 ### Using context7
 

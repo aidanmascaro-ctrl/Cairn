@@ -4,6 +4,7 @@
   import Settings from "./Settings.svelte";
   import DropZone from "./DropZone.svelte";
   import ClassifyPanel from "./ClassifyPanel.svelte";
+  import TimelinePanel from "./TimelinePanel.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -16,8 +17,17 @@
   let echoRunning = false;
 
   let ingestFolder: string | null = null;
+  let pendingAmbiguous = 0;
 
   function handleIngestComplete(e: CustomEvent<{ folder: string }>) {
+    ingestFolder = e.detail.folder;
+  }
+
+  function handlePendingChange(e: CustomEvent<{ count: number }>) {
+    pendingAmbiguous = e.detail.count;
+  }
+
+  function handleFolderPicked(e: CustomEvent<{ folder: string }>) {
     ingestFolder = e.detail.folder;
   }
 
@@ -97,7 +107,13 @@
 
   <DropZone on:ingestComplete={handleIngestComplete} />
 
-  <ClassifyPanel {ingestFolder} />
+  <ClassifyPanel
+    {ingestFolder}
+    on:pendingChange={handlePendingChange}
+    on:folderPicked={handleFolderPicked}
+  />
+
+  <TimelinePanel {ingestFolder} {pendingAmbiguous} />
 
   <Settings />
 

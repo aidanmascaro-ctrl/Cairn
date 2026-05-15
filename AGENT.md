@@ -52,12 +52,18 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 
 ## DaVinci Resolve MCP (dev sessions only)
 
-- **What it is:** `mcp__davinci-resolve__*` tools are available to Claude Code during dev sessions. They connect to Resolve via the same Python Scripting API the plugin uses (requires External Scripting enabled). They are **NOT available to the Cairn Electron plugin at runtime** — the plugin still uses `resolve_import.py` + `resolve_api.py`.
-- **Why it matters:** Live Resolve verification without user screenshots. Test bin creation, clip colours, timeline operations, and media pool state directly during the session.
-- **Confirmed working (2026-04-29):** `media_pool.add_subfolder(name, parent_path)` with path strings like `"Master/shoot/01_VIDEOS"` creates nested bins correctly. Tested and cleaned up in "060426 NE Red Track" project on Resolve Studio 21.0.0b.20.
+- **What it is:** `mcp__resolve__*` tools are available to Claude Code during dev sessions (this replaces the older `mcp__davinci-resolve__*` server). They connect to Resolve via the same Python Scripting API the plugin uses (requires External Scripting enabled). They are **NOT available to the Cairn Electron plugin at runtime** — the plugin still uses `resolve_import.py` + `resolve_api.py`.
+- **Why it matters:** Live Resolve verification without user screenshots. Test bin creation, clip colours, timeline operations, marker writes, and media pool state directly during the session.
+- **Confirmed working (2026-04-29):** Nested bin creation under `Master/shoot/01_VIDEOS` works correctly via the old `mcp__davinci-resolve__*` server. Migrate the verification calls to the new flat-namespace `mcp__resolve__*` tools on next live test.
 - **External Scripting confirmed enabled** on this machine — MCP connects successfully → `resolve_import.py` subprocess will also connect successfully.
-- **Key tools:** `resolve_control.get_version()` (verify live), `media_pool.add_subfolder/import_media/import_folder`, `folder.get_subfolders/get_clips`, `media_pool_item.set_clip_color/set_metadata`, `timeline.add_track/set_track_lock`, `project_settings.get_setting/set_setting`, `project_manager.get_current`.
-- **Test pattern:** Create test bins under `Master/_cairn_test`, verify, delete with `media_pool.delete_folders([id])`. Never import media into a user's live project during testing.
+- **Key tools (new flat namespace):**
+  - Connection: `resolve_get_version`, `resolve_get_product_name`
+  - Bins / media pool: `resolve_create_bin`, `resolve_list_bins`, `resolve_import_media`, `resolve_import_folder_to_media_pool`, `resolve_delete_bins`, `resolve_search_clips`
+  - Clip metadata + colour: `resolve_get_clip_info`, `resolve_set_clip_color`, `resolve_set_clip_metadata`, `resolve_inspect_item`
+  - Timeline: `resolve_list_timelines`, `resolve_create_empty_timeline`, `resolve_add_track`, `resolve_set_track_locked`, `resolve_get_timeline_info`, `resolve_list_clips_on_track`
+  - Markers (Stage 6): `resolve_add_marker_at`, `resolve_list_markers`, `resolve_delete_marker_at`
+  - Project: `resolve_get_project_settings`, `resolve_load_project`, `resolve_save_project`
+- **Test pattern:** Create test bins under `Master/_cairn_test`, verify, delete with `resolve_delete_bins([id])`. Never import media into a user's live project during testing.
 
 ## Platform-specific gotchas
 

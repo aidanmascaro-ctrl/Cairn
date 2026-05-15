@@ -589,6 +589,23 @@ function registerIpc() {
     return callPython({ type: "classify_confirm", payload }, { timeoutMs: 30_000 });
   });
 
+  ipcMain.handle("cairn:classify:inspect", async (_event, payload) => {
+    try {
+      return await callPython({ type: "classify_inspect", payload }, { timeoutMs: 30_000 });
+    } catch (err) {
+      return {
+        ok: false,
+        duration_sec: 0,
+        face_ratio: 0,
+        motion_score: 0,
+        knn_label: null,
+        knn_confidence: null,
+        frames: [],
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
   ipcMain.handle("cairn:classify", async (event, payload) => {
     const sendProgress = (obj) => {
       if (!event.sender.isDestroyed()) event.sender.send("cairn:classify:progress", obj);
@@ -619,6 +636,27 @@ function registerIpc() {
     }
 
     return result ?? { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
+  });
+
+  ipcMain.handle("cairn:timeline:build", async (_event, payload) => {
+    // Timeline assembly is a single Resolve transaction — no streaming.
+    // 60 s is plenty even on hundreds of clips since AppendToTimeline is bulk.
+    try {
+      return await callPython({ type: "build_timeline", payload }, { timeoutMs: 60_000 });
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        name: null,
+        fps: null,
+        resolution: null,
+        a_count: 0,
+        b_count: 0,
+        ambiguous_count: 0,
+        missing_paths: [],
+        warnings: [],
+      };
+    }
   });
 
   ipcMain.handle("cairn:ingest", async (event, payload) => {
