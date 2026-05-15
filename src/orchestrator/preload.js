@@ -8,7 +8,7 @@
 
 "use strict";
 
-const { contextBridge, ipcRenderer } = require("electron/renderer");
+const { contextBridge, ipcRenderer, webUtils } = require("electron/renderer");
 
 contextBridge.exposeInMainWorld("cairn", {
   /**
@@ -17,10 +17,43 @@ contextBridge.exposeInMainWorld("cairn", {
   openFolder: () => ipcRenderer.invoke("cairn:dialog:open-folder"),
 
   /**
+   * Resolve a dropped File to its absolute filesystem path.
+   *
+   * In sandboxed renderers (sandbox: true), the non-standard `File.path`
+   * property is not exposed. webUtils.getPathForFile is the standards-compliant
+   * replacement added in Electron 30. Returns "" if the path can't be resolved
+   * (e.g. when the File came from a synthetic source).
+   *
+   * @param {File} file
+   * @returns {string}
+   */
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
+  /**
    * Proof-of-life snapshot of Resolve state (project/timeline names).
    * Safe to call before Resolve is open — returns `{ available: false, ... }`.
    */
   getResolveSnapshot: () => ipcRenderer.invoke("cairn:resolve:snapshot"),
+
+  /**
+   * Full plugin health check — verifies WorkflowIntegration.node AND the
+   * Python scripting connection (which is what the media-pool writes use).
+   * Returns { workflowIntegration, workflowError, scriptingOk, scriptingReason }.
+   */
+  health: () => ipcRenderer.invoke("cairn:health"),
+
+  /**
+   * Subscribe to the bridge-crash signal that fires when the Python worker
+   * dies unexpectedly. Use this to show the user WHY the plugin's buttons
+   * suddenly stopped working (typically a missing Python dep). Returns an
+   * unsubscribe function.
+   * @param {(event: { code: number|null, signal: string|null, stderrTail: string }) => void} callback
+   */
+  onBridgeCrash: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("cairn:bridge:crash", listener);
+    return () => ipcRenderer.removeListener("cairn:bridge:crash", listener);
+  },
 
   /**
    * Lightweight ping — confirms the IPC channel is alive and exposes

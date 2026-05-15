@@ -54,15 +54,31 @@ if [[ ! -f "$WORKFLOW_NODE" ]]; then
 fi
 
 if [[ $DO_BUILD -eq 1 ]]; then
-    echo "→ Building UI…"
-    npm run build:ui
+    # IMPORTANT — never run npm/vite under root. If it does, dist/ and any
+    # newly-fetched node_modules entries become root-owned and subsequent
+    # non-sudo `npm run build:ui` calls fail with EACCES on dist/assets/.
+    # When the script is itself invoked with sudo, drop privileges back to the
+    # invoking user for the build, then continue with the elevated copy step.
+    if [[ $EUID -eq 0 ]]; then
+        BUILD_USER="${SUDO_USER:-${USER:-}}"
+        if [[ -z "$BUILD_USER" || "$BUILD_USER" == "root" ]]; then
+            echo "✗ Refusing to run 'npm run build:ui' as root."
+            echo "  Re-run this script without sudo, or set SUDO_USER to a real user."
+            exit 1
+        fi
+        echo "→ Building UI as user '$BUILD_USER' (avoiding root-owned dist/)…"
+        sudo -u "$BUILD_USER" npm run build:ui
+    else
+        echo "→ Building UI…"
+        npm run build:ui
+    fi
 fi
 
 INSTALL_PATH="$TARGET"
-if [[ ! -w "$(dirname "$TARGET")" ]]; then
-    echo "→ System plugin dir not writable — trying with sudo."
-    INSTALL_PATH="$TARGET"
-    USE_SUDO=1
+if [[ ! -w "$(dirname "$TARGET")" ]] && [[ $EUID -ne 0 ]]; then
+    echo "✗ System plugin dir is not writable and you're not root."
+    echo "  Re-run with: sudo bash packaging/install-dev-plugin.sh"
+    exit 1
 fi
 
 echo "→ Target: $INSTALL_PATH"

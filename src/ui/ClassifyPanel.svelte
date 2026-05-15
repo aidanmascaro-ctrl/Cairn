@@ -57,6 +57,7 @@
   let resolveFailCount = 0;
   let sidecarFailCount = 0;
   let showErrorDetail = false;
+  let lastResolveReason: string | null = null;
 
   let progressLogEl: HTMLDivElement | undefined;
 
@@ -84,6 +85,7 @@
     sidecarFailCount = 0;
     showErrorDetail = false;
     resolvedCount = 0;
+    lastResolveReason = null;
 
     const unsub = cairn.classify.onProgress((ev: ClassifyProgressEvent) => {
       if (ev.event === "classify_started") {
@@ -169,7 +171,10 @@
           ambiguous: classifyResult.ambiguous - 1,
         };
       }
-      if (!result.resolve_ok) resolveFailCount++;
+      if (!result.resolve_ok) {
+        resolveFailCount++;
+        if (result.resolve_reason) lastResolveReason = result.resolve_reason;
+      }
     } catch {
       ambiguousClips = ambiguousClips.map((c, i) => (i === idx ? { ...c, confirming: false } : c));
     }
@@ -209,6 +214,7 @@
     sidecarFailCount = 0;
     showErrorDetail = false;
     resolvedCount = 0;
+    lastResolveReason = null;
   }
 
   let resolvedCount = 0;
@@ -277,6 +283,9 @@
           >
         {/if}
       </div>
+      {#if resolveFailCount > 0 && lastResolveReason}
+        <p class="resolve-reason">{lastResolveReason}</p>
+      {/if}
       {#if showErrorDetail}
         <div class="error-detail">
           {#each clipErrors as e (e.file)}
@@ -613,6 +622,16 @@
     font-size: 0.88rem;
     color: #7dd4a0;
     margin: 0 0 1rem 0;
+  }
+  .resolve-reason {
+    font-size: 0.78rem;
+    color: #c8a030;
+    background: rgba(240, 190, 70, 0.08);
+    border: 1px solid rgba(240, 190, 70, 0.2);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.4;
   }
   .reset-btn,
   button {

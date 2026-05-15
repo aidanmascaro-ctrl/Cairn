@@ -49,6 +49,39 @@ def handle_echo(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_health_check(msg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Verify the Python ↔ Resolve scripting connection. Returns scripting_ok=True
+    if `dvr.scriptapp("Resolve")` resolves AND a project is open. Returns a
+    human-readable reason on failure so the UI can surface it as a banner.
+    """
+    scripting_ok = False
+    reason: str | None = None
+    try:
+        resolve = resolve_api.get_resolve()
+        pm = resolve.GetProjectManager()
+        project = pm.GetCurrentProject() if pm else None
+        if project is None:
+            reason = "No DaVinci Resolve project is open."
+        else:
+            scripting_ok = True
+    except resolve_api.ResolveUnavailableError as exc:
+        reason = (
+            "DaVinci Resolve scripting is not available. "
+            "Open Resolve and enable External Scripting in "
+            "Preferences → System → General. "
+            f"({exc})"
+        )
+    except Exception as exc:
+        reason = f"Unexpected error checking Resolve scripting: {exc}"
+    return {
+        "id": msg["id"],
+        "type": "health_check_result",
+        "scripting_ok": scripting_ok,
+        "reason": reason,
+    }
+
+
 def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
     """
     Persist a user-confirmed classification override for one AMBIGUOUS clip.
@@ -67,9 +100,11 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
     )
 
     resolve_ok = False
+    resolve_reason: str | None = None
     try:
-        resolve_ok = resolve_api.classify_write_resolve(clip_path, label)
+        resolve_ok, resolve_reason = resolve_api.classify_write_resolve(clip_path, label)
     except Exception as exc:
+        resolve_reason = f"Resolve write raised: {exc}"
         print(
             f"[bridge.py] classify_confirm resolve write failed: {exc}",
             file=sys.stderr,
@@ -81,6 +116,7 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
         "clip_path": clip_path,
         "label": label,
         "resolve_ok": resolve_ok,
+        "resolve_reason": resolve_reason,
     }
 
 
@@ -116,6 +152,7 @@ def handle_classify_inspect(msg: dict[str, Any]) -> dict[str, Any]:
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
+    "health_check": handle_health_check,
     "classify_confirm": handle_classify_confirm,
     "classify_inspect": handle_classify_inspect,
     "build_timeline": handle_build_timeline,
@@ -285,7 +322,9 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
                     file=sys.stderr,
                 )
             try:
-                resolve_ok = resolve_api.classify_write_resolve(event["file"], event["label"])
+                resolve_ok, _reason = resolve_api.classify_write_resolve(
+                    event["file"], event["label"]
+                )
             except Exception as exc:
                 resolve_ok = False
                 print(

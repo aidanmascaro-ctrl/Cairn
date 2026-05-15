@@ -1,6 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import type { CairnBridge, ResolveSnapshot, PingResult } from "./types";
+  import { onMount, onDestroy } from "svelte";
+  import type {
+    CairnBridge,
+    ResolveSnapshot,
+    PingResult,
+    HealthResult,
+    BridgeCrashEvent,
+  } from "./types";
   import Settings from "./Settings.svelte";
   import DropZone from "./DropZone.svelte";
   import ClassifyPanel from "./ClassifyPanel.svelte";
@@ -19,6 +25,10 @@
   let ingestFolder: string | null = null;
   let pendingAmbiguous = 0;
 
+  let health: HealthResult | null = null;
+  let bridgeCrash: BridgeCrashEvent | null = null;
+  let unsubBridgeCrash: (() => void) | null = null;
+
   function handleIngestComplete(e: CustomEvent<{ folder: string }>) {
     ingestFolder = e.detail.folder;
   }
@@ -36,13 +46,27 @@
       error = "window.cairn is not defined. Preload script did not run — check Electron setup.";
       return;
     }
+    unsubBridgeCrash = cairn.onBridgeCrash((ev) => {
+      bridgeCrash = ev;
+    });
     try {
       ping = await cairn.ping();
       snapshot = await cairn.getResolveSnapshot();
+      health = await cairn.health();
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
   });
+
+  onDestroy(() => {
+    unsubBridgeCrash?.();
+  });
+
+  async function refreshHealth() {
+    if (!cairn) return;
+    health = await cairn.health();
+    bridgeCrash = null;
+  }
 
   async function refresh() {
     if (!cairn) return;
@@ -72,38 +96,36 @@
     </p>
   </header>
 
-  <section class="card">
-    <h2>Resolve link</h2>
-    {#if error}
-      <p class="error">⚠ {error}</p>
-    {:else if snapshot === null}
-      <p>Initialising…</p>
-    {:else if snapshot.available}
-      <dl>
-        <dt>Project</dt>
-        <dd>{snapshot.projectName ?? "<unnamed>"}</dd>
-        <dt>Timeline</dt>
-        <dd>{snapshot.timelineName ?? "<none open>"}</dd>
-      </dl>
-      <button on:click={refresh}>Refresh</button>
-    {:else}
-      <p class="warn">Workflow Integration not available.</p>
-      {#if snapshot.error}
-        <p class="details">{snapshot.error}</p>
+  {#if bridgeCrash}
+    <section class="banner banner-error">
+      <strong>Python worker crashed</strong>
+      <span class="banner-detail"
+        >exit {bridgeCrash.code ?? "?"}{bridgeCrash.signal
+          ? ` (signal ${bridgeCrash.signal})`
+          : ""}</span
+      >
+      {#if bridgeCrash.stderrTail}
+        <pre class="banner-trace">{bridgeCrash.stderrTail}</pre>
       {/if}
-      <button on:click={refresh}>Retry</button>
-    {/if}
-  </section>
-
-  <section class="card">
-    <h2>Python bridge</h2>
-    <button on:click={testEcho} disabled={echoRunning}>
-      {echoRunning ? "Sending…" : "Echo test"}
-    </button>
-    {#if echoResult}
-      <p class="echo-result">{echoResult}</p>
-    {/if}
-  </section>
+      <button class="banner-btn" on:click={refreshHealth}>Retry</button>
+    </section>
+  {:else if health && (!health.scriptingOk || !health.workflowIntegration)}
+    <section class="banner banner-warn">
+      {#if !health.workflowIntegration}
+        <strong>DaVinci Resolve link is down.</strong>
+        <span class="banner-detail"
+          >{health.workflowError ?? "Install the plugin into Resolve."}</span
+        >
+      {:else if !health.scriptingOk}
+        <strong>Resolve External Scripting is not reachable.</strong>
+        <span class="banner-detail"
+          >{health.scriptingReason ??
+            "Open Resolve → Preferences → System → General and set External scripting to Local."}</span
+        >
+      {/if}
+      <button class="banner-btn" on:click={refreshHealth}>Re-check</button>
+    </section>
+  {/if}
 
   <DropZone on:ingestComplete={handleIngestComplete} />
 
@@ -117,21 +139,58 @@
 
   <Settings />
 
-  {#if ping}
-    <section class="card versions">
-      <h2>Runtime</h2>
-      <dl>
-        <dt>Plugin ID</dt>
-        <dd><code>{ping.pluginId}</code></dd>
-        <dt>Electron</dt>
-        <dd>{ping.electron}</dd>
-        <dt>Chromium</dt>
-        <dd>{ping.chrome}</dd>
-        <dt>Node</dt>
-        <dd>{ping.node}</dd>
-      </dl>
+  <details class="diagnostics">
+    <summary>Diagnostics</summary>
+
+    <section class="card">
+      <h2>Resolve link</h2>
+      {#if error}
+        <p class="error">⚠ {error}</p>
+      {:else if snapshot === null}
+        <p>Initialising…</p>
+      {:else if snapshot.available}
+        <dl>
+          <dt>Project</dt>
+          <dd>{snapshot.projectName ?? "<unnamed>"}</dd>
+          <dt>Timeline</dt>
+          <dd>{snapshot.timelineName ?? "<none open>"}</dd>
+        </dl>
+        <button on:click={refresh}>Refresh</button>
+      {:else}
+        <p class="warn">Workflow Integration not available.</p>
+        {#if snapshot.error}
+          <p class="details">{snapshot.error}</p>
+        {/if}
+        <button on:click={refresh}>Retry</button>
+      {/if}
     </section>
-  {/if}
+
+    <section class="card">
+      <h2>Python bridge</h2>
+      <button on:click={testEcho} disabled={echoRunning}>
+        {echoRunning ? "Sending…" : "Echo test"}
+      </button>
+      {#if echoResult}
+        <p class="echo-result">{echoResult}</p>
+      {/if}
+    </section>
+
+    {#if ping}
+      <section class="card versions">
+        <h2>Runtime</h2>
+        <dl>
+          <dt>Plugin ID</dt>
+          <dd><code>{ping.pluginId}</code></dd>
+          <dt>Electron</dt>
+          <dd>{ping.electron}</dd>
+          <dt>Chromium</dt>
+          <dd>{ping.chrome}</dd>
+          <dt>Node</dt>
+          <dd>{ping.node}</dd>
+        </dl>
+      </section>
+    {/if}
+  </details>
 </main>
 
 <style>
@@ -219,5 +278,94 @@
     font-family: "SF Mono", ui-monospace, monospace;
     color: #a8d8a8;
     word-break: break-all;
+  }
+  .banner {
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    line-height: 1.45;
+    font-size: 0.88rem;
+  }
+  .banner-error {
+    background: rgba(242, 139, 130, 0.08);
+    border: 1px solid rgba(242, 139, 130, 0.3);
+    color: #f28b82;
+  }
+  .banner-warn {
+    background: rgba(240, 190, 70, 0.08);
+    border: 1px solid rgba(240, 190, 70, 0.3);
+    color: #f0c850;
+  }
+  .banner strong {
+    font-weight: 700;
+  }
+  .banner-detail {
+    color: #c0c0c3;
+    flex: 1;
+    min-width: 0;
+  }
+  .banner-trace {
+    flex-basis: 100%;
+    background: #131315;
+    color: #a0a0a3;
+    border-radius: 4px;
+    padding: 0.5rem 0.6rem;
+    margin: 0.4rem 0 0 0;
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    max-height: 140px;
+    overflow: auto;
+    white-space: pre-wrap;
+  }
+  .banner-btn {
+    background: transparent;
+    color: inherit;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    margin: 0;
+  }
+  .banner-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .diagnostics {
+    margin-top: 2rem;
+  }
+  .diagnostics > summary {
+    cursor: pointer;
+    color: #7f7f82;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.4rem 0;
+    border-top: 1px solid #2a2a2c;
+    user-select: none;
+    list-style: none;
+  }
+  .diagnostics > summary::-webkit-details-marker {
+    display: none;
+  }
+  .diagnostics > summary::before {
+    content: "▸ ";
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+  .diagnostics[open] > summary::before {
+    content: "▾ ";
+  }
+  .diagnostics > summary:hover {
+    color: #b9b9b9;
+  }
+  .diagnostics[open] {
+    padding-bottom: 1rem;
+  }
+  .diagnostics > .card:first-of-type {
+    margin-top: 1rem;
   }
 </style>

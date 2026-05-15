@@ -98,6 +98,12 @@ function ensurePythonWorker() {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
+  // Tail of recent stderr — included in the crash event so the UI can show the
+  // user WHY the bridge died (missing module, syntax error, etc.) instead of
+  // generic "buttons do nothing" behaviour.
+  const STDERR_TAIL_LIMIT = 4000;
+  let stderrTail = "";
+
   const rl = createInterface({ input: pythonWorker.stdout });
   rl.on("line", (line) => {
     const trimmed = line.trim();
@@ -110,7 +116,6 @@ function ensurePythonWorker() {
     }
     const pending = pythonPending.get(msg.id);
     if (!pending) return;
-    // Progress events (any *_progress type): call callback, keep promise alive
     if (msg.type.endsWith("_progress")) {
       pending.onProgress?.(msg);
       return;
@@ -121,16 +126,27 @@ function ensurePythonWorker() {
   });
 
   pythonWorker.stderr.on("data", (chunk) => {
-    process.stderr.write(`[bridge.py] ${chunk.toString()}`);
+    const s = chunk.toString();
+    process.stderr.write(`[bridge.py] ${s}`);
+    stderrTail = (stderrTail + s).slice(-STDERR_TAIL_LIMIT);
   });
 
-  pythonWorker.on("exit", () => {
+  pythonWorker.on("exit", (code, signal) => {
     pythonWorker = null;
+    const unexpected = code !== 0 && code !== null;
     for (const [, p] of pythonPending) {
       clearTimeout(p.timer);
       p.reject(new Error("Python worker exited unexpectedly"));
     }
     pythonPending.clear();
+
+    if (unexpected && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("cairn:bridge:crash", {
+        code,
+        signal,
+        stderrTail,
+      });
+    }
   });
 }
 
@@ -506,6 +522,31 @@ function registerIpc() {
   });
 
   ipcMain.handle("cairn:resolve:snapshot", async () => getResolveSnapshot());
+
+  // Full plugin health check — verifies BOTH the WorkflowIntegration.node
+  // connection (used by main.js for project/timeline reads) AND the Python
+  // Scripting API connection (used by bridge.py for media-pool writes).
+  // The latter is the one users get tripped up by — it requires
+  // Preferences → System → General → External scripting: Local.
+  ipcMain.handle("cairn:health", async () => {
+    const snapshot = await getResolveSnapshot();
+    let scriptingOk = false;
+    let scriptingReason;
+    try {
+      const result = await callPython({ type: "health_check" }, { timeoutMs: 5_000 });
+      scriptingOk = Boolean(result?.scripting_ok);
+      scriptingReason = result?.reason ?? null;
+    } catch (err) {
+      scriptingReason = err instanceof Error ? err.message : String(err);
+    }
+    return {
+      workflowIntegration: snapshot.available,
+      workflowError: snapshot.error ?? null,
+      scriptingOk,
+      scriptingReason,
+    };
+  });
+
   ipcMain.handle("cairn:ping", async () => ({
     ok: true,
     pluginId: PLUGIN_ID,
@@ -710,31 +751,47 @@ function registerIpc() {
       };
     }
 
-    // ── Resolve import (15 s hard timeout) ───────────────────────────────────
+    // ── Resolve import fallback ──────────────────────────────────────────────
+    // The bridge (bridge.py handle_ingest -> resolve_api.ingest_into_resolve)
+    // is the primary Resolve-import path. It builds the Cairn bin tree, sets
+    // per-clip metadata, and dedupes against what's already imported. We only
+    // fall back to resolve_import.py (which would create a SECOND parallel bin
+    // tree under <shoot_folder>/...) when the bridge couldn't reach Resolve at
+    // all — that's signalled by resolve_counts being empty AND no clips imported.
     if (!payload.dry_run) {
-      const msgId = "";
-      try {
-        const resolveCounts = await Promise.race([
-          importFolderToResolve(result, event.sender, msgId),
-          new Promise((_res, rej) =>
-            setTimeout(() => rej(new Error("Resolve import timed out (150 s)")), 150_000),
-          ),
-        ]);
-        if (resolveCounts) {
-          result.resolve_counts = resolveCounts;
-        } else {
+      const bridgeTotal =
+        (result.resolve_counts?.a_cam ?? 0) +
+        (result.resolve_counts?.c_cam ?? 0) +
+        (result.resolve_counts?.photos ?? 0);
+
+      const bridgeImported =
+        result.resolve_counts && Object.keys(result.resolve_counts).length > 0 && bridgeTotal > 0;
+
+      if (!bridgeImported) {
+        const msgId = "";
+        try {
+          const resolveCounts = await Promise.race([
+            importFolderToResolve(result, event.sender, msgId),
+            new Promise((_res, rej) =>
+              setTimeout(() => rej(new Error("Resolve import timed out (150 s)")), 150_000),
+            ),
+          ]);
+          if (resolveCounts) {
+            result.resolve_counts = resolveCounts;
+          } else {
+            sendProgress({
+              type: "ingest_progress",
+              event: "resolve_skipped",
+              reason: "WorkflowIntegration not available — install the plugin into Resolve.",
+            });
+          }
+        } catch (err) {
           sendProgress({
             type: "ingest_progress",
             event: "resolve_skipped",
-            reason: "WorkflowIntegration not available — install the plugin into Resolve.",
+            reason: err instanceof Error ? err.message : String(err),
           });
         }
-      } catch (err) {
-        sendProgress({
-          type: "ingest_progress",
-          event: "resolve_skipped",
-          reason: err instanceof Error ? err.message : String(err),
-        });
       }
     }
 

@@ -92,6 +92,8 @@ export interface IngestProgressEvent {
 export interface IngestResult {
   folder: string;
   files_moved: number;
+  /** Count of files that hit OSError during shutil.move — 0 on a clean run. */
+  move_failures?: number;
   shells_removed: number;
   metadata: IngestMetadata;
   clip_paths: IngestClipPaths;
@@ -159,6 +161,7 @@ export interface ClassifyConfirmResult {
   clip_path: string;
   label: ClassifyLabel;
   resolve_ok: boolean;
+  resolve_reason: string | null;
 }
 
 export interface ClassifyInspectFrame {
@@ -214,9 +217,30 @@ export interface TimelineApi {
   build(payload: BuildTimelinePayload): Promise<BuildTimelineResult>;
 }
 
+export interface HealthResult {
+  workflowIntegration: boolean;
+  workflowError: string | null;
+  scriptingOk: boolean;
+  scriptingReason: string | null;
+}
+
+export interface BridgeCrashEvent {
+  code: number | null;
+  signal: string | null;
+  stderrTail: string;
+}
+
 export interface CairnBridge {
   openFolder(): Promise<string | null>;
+  /**
+   * Resolve a File from a drop event to its absolute filesystem path.
+   * Required in sandboxed renderers where the non-standard File.path is hidden.
+   * Returns "" if the path can't be resolved.
+   */
+  getPathForFile(file: File): string;
   getResolveSnapshot(): Promise<ResolveSnapshot>;
+  health(): Promise<HealthResult>;
+  onBridgeCrash(callback: (event: BridgeCrashEvent) => void): () => void;
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;
   ingest: IngestApi;

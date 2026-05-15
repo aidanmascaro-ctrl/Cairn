@@ -479,6 +479,10 @@ def run(
     # ── Collect and move ──────────────────────────────────────────────────────
     buckets = collect_files(folder)
     files_moved = 0
+    move_failures = 0
+    # Track destination paths we've already counted so reclassify passes don't
+    # double-count files that this run already moved.
+    counted_dsts: set[str] = set()
     clip_paths: dict[str, list[str]] = {
         "a_cam": [],
         "c_cam": [],
@@ -486,29 +490,41 @@ def run(
         "assets": [],
     }
 
-    for event in move_files(buckets["videos"], folder / "01_VIDEOS" / "A_CAM", dry_run):
+    def _tick(event: dict) -> bool:
+        """Increment files_moved only on real, non-duplicate move successes.
+        Returns True if the event represents a fresh successful move."""
+        nonlocal files_moved, move_failures
+        if event.get("event") == "file_move_failed":
+            move_failures += 1
+            return False
+        dst = event.get("dst", "")
+        if not dst or dst in counted_dsts:
+            return False
+        counted_dsts.add(dst)
         files_moved += 1
-        if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
+        return True
+
+    for event in move_files(buckets["videos"], folder / "01_VIDEOS" / "A_CAM", dry_run):
+        if _tick(event) and event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
             clip_paths["a_cam"].append(event["dst"])
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["dji"], folder / "01_VIDEOS" / "C_CAM", dry_run):
-        files_moved += 1
-        if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
+        if _tick(event) and event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
             clip_paths["c_cam"].append(event["dst"])
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["photos"], folder / "02_PHOTOS", dry_run):
-        files_moved += 1
-        clip_paths["photos"].append(event["dst"])
+        if _tick(event):
+            clip_paths["photos"].append(event["dst"])
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["thumbnails"], folder / "03_ASSETS" / "Thumbnails", dry_run):
-        files_moved += 1
+        _tick(event)
         yield {"type": "progress", **event}
 
     for event in move_files(buckets["assets"], folder / "03_ASSETS", dry_run):
-        files_moved += 1
+        _tick(event)
         yield {"type": "progress", **event}
 
     # ── Reclassify DJI clips already sitting in A_CAM → C_CAM ────────────────
@@ -522,8 +538,7 @@ def run(
             if f.is_file() and f.suffix.lower() in VIDEO_EXTS and is_dji_clip(f.name)
         ]
         for event in move_files(dji_in_a_cam, c_cam_dir, dry_run):
-            files_moved += 1
-            if event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
+            if _tick(event) and event["dst"].lower().endswith(tuple(VIDEO_EXTS)):
                 clip_paths["c_cam"].append(event["dst"])
             yield {"type": "progress", **event}
 
@@ -538,8 +553,8 @@ def run(
             if f.is_file() and (f.suffix.lower() == ".xmp" or f.suffix == "")
         ]
         for event in move_files(xmp_in_assets, photos_dir, dry_run):
-            files_moved += 1
-            clip_paths["photos"].append(event["dst"])
+            if _tick(event):
+                clip_paths["photos"].append(event["dst"])
             yield {"type": "progress", **event}
 
     # ── Reclassify thumbnail JPEGs in 02_PHOTOS → 03_ASSETS/Thumbnails ───────
@@ -565,7 +580,7 @@ def run(
             and is_thumbnail_jpeg(f.stem, video_stems_in_place)
         ]
         for event in move_files(thumb_jpegs_in_photos, thumbnails_dir, dry_run):
-            files_moved += 1
+            _tick(event)
             yield {"type": "progress", **event}
 
     # ── Empty shell cleanup ───────────────────────────────────────────────────
@@ -577,6 +592,7 @@ def run(
         "event": "complete",
         "folder": str(folder),
         "files_moved": files_moved,
+        "move_failures": move_failures,
         "shells_removed": shells_removed,
         "metadata": meta,
         "clip_paths": clip_paths,

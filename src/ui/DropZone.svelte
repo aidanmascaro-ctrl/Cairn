@@ -38,10 +38,18 @@
     e.preventDefault();
     isDragOver = false;
     const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-    // Electron exposes an absolute `path` property on dropped File objects
-    const f = files[0] as File & { path?: string };
-    if (f.path) folderPath = f.path;
+    if (!cairn || !files || files.length === 0) return;
+    // In sandboxed renderers File.path is hidden, so resolve via the preload
+    // bridge (webUtils.getPathForFile). Returns "" if the source isn't a real
+    // file on disk — e.g. a synthetic drag payload from another app.
+    const resolved = cairn.getPathForFile(files[0]);
+    if (resolved) {
+      folderPath = resolved;
+      errorMsg = "";
+    } else {
+      errorMsg = "Could not resolve a path for the dropped item — try the Choose folder button.";
+      state = "error";
+    }
   }
 
   async function pickFolder() {
@@ -146,6 +154,10 @@
         <dd class="path-dd">{result.folder}</dd>
         <dt>Files moved</dt>
         <dd>{result.files_moved}</dd>
+        {#if (result.move_failures ?? 0) > 0}
+          <dt>Move failures</dt>
+          <dd class="warn-dd">{result.move_failures}</dd>
+        {/if}
         <dt>A-cam clips</dt>
         <dd>{result.clip_paths.a_cam.length}</dd>
         {#if result.clip_paths.c_cam.length > 0}
@@ -322,6 +334,10 @@
     font-size: 0.78rem;
     word-break: break-all;
     color: #9a9a9f;
+  }
+  .warn-dd {
+    color: #f0c850;
+    font-weight: 600;
   }
   .result-error {
     margin-top: 0.75rem;

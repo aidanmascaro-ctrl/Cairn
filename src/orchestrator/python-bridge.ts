@@ -159,6 +159,7 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
     clip_path: z.string(),
     label: ClassifyLabelSchema,
     resolve_ok: z.boolean(),
+    resolve_reason: z.string().nullable().optional(),
   }),
   // Build timeline result — final; resolves the call
   z.object({

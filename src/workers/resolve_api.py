@@ -329,6 +329,21 @@ _LABEL_COLOR: dict[str, str] = {
     "AMBIGUOUS": "Yellow",
 }
 
+# Flag colours mirror the clip colours so the editor sees the same hue both
+# on the clip thumbnail and the flag pip. Resolve accepts the same names as
+# SetClipColor for AddFlag.
+_LABEL_FLAG: dict[str, str] = {
+    "A-ROLL": "Blue",
+    "B-ROLL": "Green",
+    "AMBIGUOUS": "Yellow",
+}
+
+# Custom metadata key for our classification. Resolve's built-in "Keywords"
+# column is NOT writable via SetMetadata — that key is reserved by the media
+# pool's tagging system and SetMetadata silently returns False on it. Use a
+# custom key so the value actually persists and shows up in the Metadata pane.
+CAIRN_CLASSIFICATION_KEY: str = "Cairn Classification"
+
 
 def set_clip_color(clip: Any, color: str) -> bool:
     """Set clip colour via SetClipColor. Returns True on success."""
@@ -354,12 +369,22 @@ def get_clip_by_path(media_pool: Any, file_path: str) -> Any | None:
     return _search_folder(media_pool.GetRootFolder(), file_path)
 
 
-def classify_write_resolve(clip_path: str, label: str) -> bool:
+def classify_write_resolve(clip_path: str, label: str) -> tuple[bool, str | None]:
     """
-    Write classification label (Keywords) and clip colour to Resolve.
-    Acquires the module lock -- must not be called while ingest_into_resolve is
+    Write the classification onto a clip in the Resolve media pool. Three writes
+    are performed, each checked for success:
+
+      1. Custom metadata key "Cairn Classification" = label
+      2. Clip colour (Blue / Green / Yellow per _LABEL_COLOR)
+      3. Coloured flag (same hue) so the bin's flag column also tells the story
+
+    Returns (ok, reason). ok is False if any of the writes failed or the
+    pre-conditions couldn't be met. reason is a short string explaining the
+    failure for the UI (None on success). All failures are also logged to
+    stderr.
+
+    Acquires the module lock — must not be called while ingest_into_resolve is
     running in the same process.
-    Returns True on success, False if Resolve unavailable or clip not found.
     """
     _acquire_lock()
     try:
@@ -367,16 +392,69 @@ def classify_write_resolve(clip_path: str, label: str) -> bool:
         pm = resolve.GetProjectManager()
         project = pm.GetCurrentProject()
         if project is None:
-            return False
+            reason = "No DaVinci Resolve project is open."
+            print(f"[resolve_api] classify_write_resolve: {reason}", file=sys.stderr)
+            return False, reason
+
         mp = project.GetMediaPool()
         clip = get_clip_by_path(mp, clip_path)
         if clip is None:
-            return False
-        set_clip_metadata(clip, {"Keywords": label})
+            reason = f"Clip not found in media pool: {clip_path}"
+            print(f"[resolve_api] classify_write_resolve: {reason}", file=sys.stderr)
+            return False, reason
+
+        # 1. Custom metadata — Resolve's built-in "Keywords" column is read-only
+        # via SetMetadata, so we use our own key. SetMetadata returns False on
+        # any failure (bad key, locked clip, etc.). Check it.
+        meta_ok = bool(clip.SetMetadata(CAIRN_CLASSIFICATION_KEY, label))
+        if not meta_ok:
+            print(
+                f"[resolve_api] SetMetadata({CAIRN_CLASSIFICATION_KEY!r}, {label!r}) "
+                f"returned False for {clip_path}",
+                file=sys.stderr,
+            )
+
+        # 2. Clip colour — visual signal in the bin viewer.
         color = _LABEL_COLOR.get(label)
-        return not (color and not set_clip_color(clip, color))
-    except ResolveUnavailableError:
-        return False
+        color_ok = True
+        if color:
+            color_ok = set_clip_color(clip, color)
+            if not color_ok:
+                print(
+                    f"[resolve_api] SetClipColor({color!r}) returned False for {clip_path}",
+                    file=sys.stderr,
+                )
+
+        # 3. Flag — second visual signal that also surfaces in the flag column
+        # and on the timeline. Best-effort: don't fail the whole write if the
+        # flag API isn't available on this Resolve build (older builds don't
+        # expose AddFlag on MediaPoolItem).
+        flag_color = _LABEL_FLAG.get(label)
+        if flag_color and hasattr(clip, "AddFlag"):
+            try:
+                # Clear any prior Cairn-set flag so re-classify doesn't stack.
+                if hasattr(clip, "ClearFlags"):
+                    clip.ClearFlags(flag_color)
+                clip.AddFlag(flag_color)
+            except Exception as exc:
+                print(f"[resolve_api] AddFlag failed for {clip_path}: {exc}", file=sys.stderr)
+
+        if not (meta_ok and color_ok):
+            failed = []
+            if not meta_ok:
+                failed.append("metadata")
+            if not color_ok:
+                failed.append("colour")
+            return False, f"Resolve write failed: {', '.join(failed)}"
+
+        return True, None
+    except ResolveUnavailableError as exc:
+        reason = (
+            "DaVinci Resolve scripting is not available. "
+            "Open Resolve and enable External Scripting in Preferences → System → General."
+        )
+        print(f"[resolve_api] classify_write_resolve: {exc}", file=sys.stderr)
+        return False, reason
     finally:
         _release_lock()
 
