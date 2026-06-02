@@ -33,6 +33,10 @@ venv/
 *.swp
 *.swo
 
+# Claude Code — machine-local agent config (settings.local.json + hooks that
+# hardcode absolute paths). Never commit; share a settings.example.json instead.
+.claude/
+
 # Packaging artefacts (signed installers are built, not committed)
 packaging/out/
 packaging/cert/

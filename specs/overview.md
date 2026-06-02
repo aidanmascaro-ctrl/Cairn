@@ -1,25 +1,44 @@
 # specs/overview.md — Cairn Architecture Overview
 
-> Distilled from `spec.md`. This file is the cross-cutting reference for every stage. Read it alongside the per-stage spec you're implementing.
+> Distilled from `spec.md`. This file is the cross-cutting reference for every
+> stage. Read it alongside the per-stage spec you're implementing.
+>
+> **Scope (post 966ce94 reset):** the shipping product is the **4-stage**
+> pipeline below. Stages 3–8 of the original vision (transcribe, vision, brief,
+> soundbites, matching, sidebar cockpit) are **DEFERRED post-v1** — their specs
+> are preserved under `docs/archive/specs/` and must not be treated as active
+> goals.
 
 ## Purpose
 
-Establish the non-stage-specific invariants: visual system, data flow, process topology, distribution architecture, out-of-scope items. Every stage spec assumes these as given and does not re-state them.
+Establish the non-stage-specific invariants: visual system, data flow, process
+topology, distribution architecture, out-of-scope items. Every stage spec
+assumes these as given and does not re-state them.
 
 ## The pipeline at a glance
 
+**Shipping today (4 stages):**
+
 ```
-Stage 1  INGEST       organise.py logic → Resolve bins + clip import
-Stage 2  CLASSIFY     Silero VAD → A-roll / B-roll / Ambiguous + clip colour
-Stage 3  TRANSCRIBE   AssemblyAI (or Whisper) → subtitle track + JSON sidecar
-Stage 4  VISION       5 frames → Claude → structured tags in Keywords
-Stage 5  BRIEF        Chat panel → structured project brief JSON
-Stage 6  SOUNDBITES   Claude selection → Resolve markers at source timecode
-Stage 7  MATCHING     Literal + thematic B-roll → Keywords/Shot/Description
-Stage 8  SIDEBAR      Story map UI, click-to-jump, B-roll preview
+Stage 1  INGEST     organise shoot folder → Resolve bins + clip import + sidecar
+Stage 2  CLASSIFY   KNN over face_ratio + motion_score → A-roll / B-roll / Ambiguous
+Stage 3  COLOUR     media-pool clip colour (inline in resolve_api on classify write)
+Stage 4  TIMELINE   build assembly timeline — A-roll → V1/A1, B-roll → V2/A2
 ```
 
-Each stage is independently useful — the plugin can ship after any stage and still save the user time.
+Each stage is independently useful — the plugin can ship after any stage and
+still save the user time.
+
+**Deferred post-v1 (stripped in the scope reset; specs in `docs/archive/`):**
+
+```
+TRANSCRIBE   AssemblyAI / Whisper → subtitle track + JSON sidecar
+VISION       frame extraction → Claude → structured tags
+BRIEF        chat panel → structured project brief JSON
+SOUNDBITES   Claude selection → Resolve markers at source timecode
+MATCHING     literal + thematic B-roll → Keywords/Shot/Description
+SIDEBAR      story-map cockpit, click-to-jump, B-roll preview
+```
 
 ## Process topology
 
@@ -27,26 +46,33 @@ Each stage is independently useful — the plugin can ship after any stage and s
 Resolve Studio
  └── Workflow Integration: Cairn
       └── Electron (Svelte UI)
-           └── Node orchestrator (TypeScript strict)
-                ├── Resolve JS API (in-process)
-                ├── AssemblyAI API (network)
-                ├── Anthropic API (network)
-                └── Python workers (child processes, JSON-per-line stdin/stdout)
-                     ├── ingest.py      (organise logic)
-                     ├── classify.py    (Silero VAD)
-                     ├── transcribe.py  (AssemblyAI / Whisper)
-                     ├── vision.py      (frame extraction + Claude vision)
-                     ├── resolve_api.py (Resolve Python scripting)
-                     └── sidecar.py     (read/write sidecar JSON)
+           └── Node orchestrator (src/orchestrator/main.js, CommonJS)
+                ├── Resolve JS API (in-process, inline in main.js today)
+                └── Python worker (long-lived child process,
+                    JSON-per-line stdin/stdout via src/orchestrator/python-bridge.ts)
+                     └── src/workers/bridge.py  (IPC dispatcher) imports:
+                          ├── ingest.py        (Stage 1 — organise + import)
+                          ├── classify.py      (Stage 2 — KNN face + motion, local)
+                          ├── resolve_api.py   (Resolve scripting + clip colour)
+                          ├── resolve_import.py (legacy import fallback — to be removed)
+                          ├── timeline.py      (Stage 4 — assembly timeline)
+                          └── sidecar.py       (read/write sidecar JSON)
 ```
 
-**Serialisation rule (taste invariant #3):** all Resolve Scripting API calls flow through a single worker. The API is not thread-safe. Node may fan out to multiple Python workers for CPU-bound work (frame extraction, VAD) but every Resolve mutation goes through one queue.
+**No network workers today.** Classification is fully local (OpenCV + ffmpeg).
+The AssemblyAI / Anthropic clients belong to deferred stages and are not spawned
+by any current worker.
+
+**Serialisation rule (taste invariant #3):** all Resolve Scripting API calls
+flow through the single long-lived worker, which serialises them behind a
+module lock. The API is not thread-safe. Node may fan out CPU-bound work
+(frame extraction, face/motion) but every Resolve mutation goes through one queue.
 
 ## The two-colour visual system
 
 Two colour dimensions operate at different levels. They never collide.
 
-**Media pool clip colour** = what _kind_ of clip it is:
+**Media pool clip colour** (Stage 3) = what _kind_ of clip it is:
 
 | Category  | Colour |
 | --------- | ------ |
@@ -56,59 +82,64 @@ Two colour dimensions operate at different levels. They never collide.
 | PHOTOS    | Purple |
 | ASSETS    | Tan    |
 
-**Timeline marker colour** (on A-roll clips only) = what _type of story beat_ a soundbite is:
+**Timeline marker colour** (story-beat type on soundbites) — **DEFERRED** with
+the soundbites stage; documented in `docs/archive/specs/soundbites.md`.
 
-| Beat type                | Colour                           |
-| ------------------------ | -------------------------------- |
-| Origin / story           | Green                            |
-| Emotional peak           | Red                              |
-| Factual / informational  | Blue                             |
-| Hook / attention-grabber | Yellow                           |
-| (additional types)       | remaining Resolve marker colours |
-
-Resolve's accepted marker colours (from CLAUDE.md): Blue, Cyan, Green, Yellow, Red, Pink, Purple, Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream. Clip colours are a different enumerated set — per-stage specs must validate their chosen names against `SetClipColor` before writing.
+Resolve's accepted marker colours: Blue, Cyan, Green, Yellow, Red, Pink, Purple,
+Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream. Clip colours are a
+different enumerated set — per-stage specs must validate names against
+`SetClipColor` before writing.
 
 ## Data rule — Resolve-first + sidecar-backed
 
 Every piece of generated metadata lives in two synchronised places:
 
-1. **Resolve** — for editor workflow (Keywords, Shot, Description, Subtitle tracks, Markers, Clip colour)
+1. **Resolve** — for editor workflow (Keywords / metadata, Clip colour, and —
+   for deferred stages — Subtitle tracks, Markers, Shot/Description fields)
 2. **Sidecar JSON** — for re-ingest, debugging, recovery, and plugin state
 
-**Write order is always sidecar first, then Resolve.** This keeps re-ingest idempotent: the sidecar is the canonical record; Resolve is a projection of it. If the plugin crashes mid-write, the sidecar still exists and the next run reconciles.
+**Write order is always sidecar first, then Resolve.** The sidecar is the
+canonical record; Resolve is a projection of it. If the plugin crashes mid-write,
+the sidecar still exists and the next run reconciles.
 
-Sidecar location: `<project>/04_EXPORT/.cairn/<clip-id>.json`. Schema versioned: `{"schema_version": 1, ...}`.
+Sidecar location: `<project>/04_EXPORT/.cairn/<clip-id>.json`. Schema versioned:
+`{"schema_version": 1, ...}`. (Clip id = `sha256(absolute_path)[:16]`.)
 
-| Data                           | Resolve field    | Sidecar                   | Never                 |
-| ------------------------------ | ---------------- | ------------------------- | --------------------- |
-| Classification (A/B/Ambiguous) | Keywords         | `<clip>.json`             | —                     |
-| Clip colour                    | SetClipColor     | — (visual only)           | —                     |
-| Transcript                     | Subtitle track   | Full JSON + timestamps    | —                     |
-| Visual tags                    | Keywords         | Full tag set + confidence | —                     |
-| Match IDs                      | Shot             | Full match data           | —                     |
-| Free-text notes                | Description      | —                         | —                     |
-| Soundbite markers              | Timeline markers | Marker audit log          | —                     |
-| Project brief                  | —                | `brief.json`              | Resolve fields        |
-| API keys                       | —                | OS keychain via keytar    | `.env`, code, sidecar |
+| Data                           | Resolve field                   | Sidecar                                  | Status   |
+| ------------------------------ | ------------------------------- | ---------------------------------------- | -------- |
+| Classification (A/B/Ambiguous) | `Cairn Classification` metadata | `classification` + `classification_meta` | active   |
+| Clip colour                    | SetClipColor + AddFlag          | — (visual only)                          | active   |
+| Transcript                     | Subtitle track                  | Full JSON + timestamps                   | deferred |
+| Visual tags                    | Keywords                        | Full tag set + confidence                | deferred |
+| Match IDs                      | Shot                            | Full match data                          | deferred |
+| Free-text notes                | Description                     | —                                        | deferred |
+| Soundbite markers              | Timeline markers                | Marker audit log                         | deferred |
+| Project brief                  | —                               | `brief.json`                             | deferred |
+| API keys                       | —                               | OS keychain / safeStorage                | active   |
 
 ## Distribution architecture (shipping to other editors)
 
 - **BYOK** for AssemblyAI + Anthropic — users enter keys in plugin Settings.
-- **Cloud-first defaults** (AssemblyAI Universal-2, Claude) for reliability.
-- **Local fallbacks** (faster-whisper for transcription, optional local vision) for NDA work. Turned on via per-project opt-in.
-- **Pluggable backend** — transcription and vision providers behind a clean interface so open-source contributions can swap providers.
-- **Config location**: `~/Library/Application Support/Cairn/` (Mac), `%APPDATA%\Cairn\` (Windows). Plugin updates never wipe settings.
-- **Installers**: `.dmg` (Mac, signed + notarised), `.exe` (Windows, signed). Apple Developer account ~$100/year.
+  (Keys are accepted today but only exercised once the deferred AI stages return.)
+- **Local-first today**: the shipping pipeline needs no cloud account — ingest,
+  classify, colour and timeline all run locally with bundled ffmpeg + OpenCV.
+- **Local fallbacks** (faster-whisper, local vision) planned for the deferred
+  transcription/vision stages, toggled via per-project opt-in for NDA work.
+- **Config location**: `~/Library/Application Support/Cairn/` (Mac),
+  `%APPDATA%\Cairn\` (Windows). Plugin updates never wipe settings.
+- **Installers**: `.dmg` (Mac, signed + notarised), `.exe` (Windows, signed).
 - **Telemetry off by default.** User privacy > product metrics.
-- **No lock-in**: all metadata in standard formats (JSON sidecars, Resolve native fields) so users can extract their work if they leave.
+- **No lock-in**: all metadata in standard formats (JSON sidecars, Resolve native
+  fields) so users can extract their work if they leave.
 
 ## Out-of-scope for v1
 
 The following are explicit non-goals. Do not implement or propose them.
 
-- Assembled rough-cut timelines
+- **Editorial cutting / trimming / sequencing.** Stage 4 builds a _layered
+  assembly_ (A-roll on V1, B-roll on V2) — it does **not** cut, trim, reorder, or
+  produce a rough cut. Cairn identifies and assembles tracks; it does not edit.
 - Reel candidate timelines
-- Any automated cutting / sequencing / assembly
 - Resolve's built-in AI tools (IntelliScript, Magic Mask, SuperScale) — v2
 - Music / SFX suggestions
 - Colour grading
@@ -118,7 +149,7 @@ The following are explicit non-goals. Do not implement or propose them.
 
 ## Sensors (system-wide)
 
-These apply to every stage and are run automatically by the harness:
+Run automatically by the harness:
 
 - **TypeScript strict compile** — never `any`-cast away errors
 - **pyrefly** — Python type check, blocks on errors
@@ -126,12 +157,18 @@ These apply to every stage and are run automatically by the harness:
 - **ruff** — Python lint; no TODO comments in `main` (only in `fix_plan.md`)
 - **Vitest / pytest** — unit + integration
 - **Resolve API read-back** — after every mutation, re-read and confirm
-- **LLM-as-judge** — second Claude call to score confidence on any first-Claude selection output
-- **Meta-reasoning rule** — in any prompt file under `src/orchestrator/prompts/`, the prompt must identify at least two ways its approach could be wrong and address them in-prompt
+- **Classifier eval harness** — held-out accuracy gate on KNN changes
+- **Meta-reasoning rule** — any prompt file under `src/orchestrator/prompts/`
+  must identify ≥2 ways its approach could be wrong and address them in-prompt
+  (applies once the deferred LLM stages return)
 
 ## Open questions (cross-cutting)
 
-- Where exactly does the plugin bundle Python? PyInstaller + codesign on Mac is the plan, but verify the sandboxed Electron model permits spawning the PyInstaller binary. Investigate during Task 3.
-- How is `ffmpeg` located at runtime? Decision: ship vendored binary at `assets/bin/ffmpeg` (macOS) + `assets/bin/ffmpeg.exe` (Windows). Setup script downloads on first dev install. Binary path resolved via `app.getAppPath()`-relative.
-- Single worker vs. per-stage worker? Decision pending benchmark — start with one long-lived `bridge.py` process that dispatches by message `type`; split later if Resolve API latency becomes a scheduling problem.
-- Sidecar schema migration strategy? v1 assumption: migrator runs on load if `schema_version` < current; define on first breaking change.
+- PyInstaller bundle: confirm the sandboxed Electron model permits spawning the
+  bundled `workers` binary, and smoke-test that `classify` (cv2) and
+  `build_timeline` actually run inside the bundle (see `fix_plan.md`).
+- `ffmpeg`/`ffprobe` runtime location: vendored at `assets/bin/`, resolved
+  bundled → Homebrew → PATH (see `classify.py` / `trainer.js`).
+- Single long-lived `bridge.py` worker vs per-stage workers — currently one
+  dispatcher; revisit if Resolve API latency becomes a scheduling problem.
+- Sidecar schema migration: migrator runs on load when `schema_version` < current.

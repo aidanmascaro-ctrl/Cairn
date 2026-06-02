@@ -1,132 +1,144 @@
 # specs/classify.md — Stage 2: Classify A-roll vs B-roll
 
+> **Algorithm note (scope reset 966ce94):** Cairn classifies on **vision, not
+> audio**. The earlier Silero-VAD speech-ratio design was removed — the user
+> keeps a live mic on the interview subject while shooting B-roll, so any speech
+> signal is unreliable as a primary classifier. The shipping classifier is a
+> **KNN model over two local visual features (face ratio + motion score)**. This
+> spec documents the implemented behaviour in `src/workers/classify.py`.
+
 ## Purpose
 
-For every imported video clip, decide whether it's A-roll (primary dialogue), B-roll (visual only or ambient), or Ambiguous (needs human review). Tag the clip in Resolve and apply the media-pool colour so the editor sees categories at a glance.
+For every imported video clip, decide whether it's **A-ROLL** (primary subject
+/ talking head), **B-ROLL** (visual-only / cutaway), or **AMBIGUOUS** (needs
+human review). Tag the clip in Resolve and apply the media-pool colour so the
+editor sees categories at a glance. Classification runs **entirely locally with
+no network calls.**
 
 ## Inputs
 
-- Every clip in Media Pool bins `01_VIDEOS/A_CAM` and `01_VIDEOS/B_CAM` that has:
-  - A sidecar with `"stages_complete"` containing `"ingest"`
-  - `"stages_complete"` NOT containing `"classify"` (idempotency)
-- The clip file itself (read via ffmpeg to extract audio).
+- Every clip under the shoot's `01_VIDEOS/{A_CAM,B_CAM,C_CAM}` whose sidecar:
+  - has `"stages_complete"` containing `"ingest"`, and
+  - does **not** contain `"classify"` (idempotency — already-classified clips
+    are skipped and re-emitted as `clip_skipped`).
+- The clip file itself, read via the vendored `ffmpeg`/`ffprobe`
+  (`assets/bin/`) to probe duration and extract sample frames.
+- The KNN training set at `~/.cairn/ground_truth.json` (written by
+  `tools/trainer.js`), when present.
 
-**Not touched:** photos, assets. These are pre-coloured by ingest (Purple, Tan).
+**Not touched:** photos, assets. These are pre-coloured by ingest.
+
+## Features (per clip)
+
+Five frames are extracted at **10 / 25 / 50 / 75 / 90 %** of the clip duration
+(downscaled to 640 px wide) and reused for both features:
+
+1. **`face_ratio`** — frames containing ≥1 detected face / frames sampled.
+   Detection uses the OpenCV frontal-face **Haar cascade** (local, no model
+   download). Min face box edge `FACE_MIN_SIZE = 50 px` filters noise.
+2. **`motion_score`** — mean normalised frame-to-frame absolute pixel diff over
+   the grayscale frames (`0.0` = static, `1.0` = chaotic). `< 2` frames → `0.0`.
+
+## Decision
+
+```
+KNN lookup (k=5) against ground_truth.json
+  ├─ ≥ KNN_MIN_EXAMPLES (5) examples available
+  │     ├─ winning-label vote share ≥ KNN_CONFIDENCE_THRESHOLD (0.70) → that label
+  │     └─ vote share < 0.70                                          → AMBIGUOUS
+  └─ < 5 examples (cold start) → rule fallback:
+        face_ratio ≥ FACE_THRESHOLD (0.40) → A-ROLL, else B-ROLL
+```
+
+Distance is the squared Euclidean distance in **range-normalised**
+`(face_ratio, motion_score)` space (each feature divided by its observed range
+across the training set). Labels come from the `k` nearest neighbours; the
+modal label wins and its vote share is the confidence.
+
+**Tunable constants** (top of `classify.py`):
+
+| Constant                   | Value | Meaning                                     |
+| -------------------------- | ----- | ------------------------------------------- |
+| `FACE_THRESHOLD`           | 0.40  | rule-fallback A-roll cutoff on `face_ratio` |
+| `FACE_SAMPLE_COUNT`        | 5     | frames sampled per clip                     |
+| `FACE_MIN_SIZE`            | 50    | min face box edge (px)                      |
+| `KNN_K`                    | 5     | neighbours considered                       |
+| `KNN_MIN_EXAMPLES`         | 5     | min training examples before KNN engages    |
+| `KNN_CONFIDENCE_THRESHOLD` | 0.70  | min winning vote share to commit a label    |
 
 ## Outputs
 
 **Per clip:**
 
-- **Classification label** written to Resolve `Keywords`: one of `A-ROLL`, `B-ROLL`, `AMBIGUOUS`.
-- **Clip colour** set via `SetClipColor`:
-  - `A-ROLL` → Blue
-  - `B-ROLL` → Green
-  - `AMBIGUOUS` → Yellow
-- **Sidecar updated** with:
+- **Classification label** → Resolve custom metadata key `Cairn Classification`
+  (`A-ROLL` / `B-ROLL` / `AMBIGUOUS`), plus `SetClipColor` and `AddFlag` —
+  written by `resolve_api.classify_write_resolve`.
+- **Clip colour** (the two-colour visual system, see `overview.md`):
+  - `A-ROLL` → Blue · `B-ROLL` → Green · `AMBIGUOUS` → Yellow
+- **Sidecar updated** (sidecar first, then Resolve — taste invariant #6):
+
   ```json
   {
     "classification": "A-ROLL" | "B-ROLL" | "AMBIGUOUS",
-    "vad": {
-      "speech_ratio": 0.82,       // seconds of speech / total duration
-      "speech_segments": [[0.4, 1.9], [2.3, 4.1], …],
-      "model": "silero-vad",
-      "model_version": "4.0",
-      "threshold_used": 0.5
+    "classification_meta": {
+      "duration_sec": 12.42,
+      "face_ratio": 0.6,
+      "face_frames": 3,
+      "frames_sampled": 5,
+      "motion_score": 0.0431,
+      "classifier_version": "v3-knn-face-motion"
     },
     "stages_complete": ["ingest", "classify"]
   }
   ```
 
-**Review panel surface:**
+**Streaming events** (one JSON line each, consumed by the orchestrator):
+`clip_classified` / `clip_skipped` / `clip_error` per clip, then a final
+`classify_complete` summary `{a_roll, b_roll, ambiguous, skipped, total}`.
 
-- All clips classified `AMBIGUOUS` appear in a plugin panel with a scrubbable preview and two buttons (`Mark A-roll` / `Mark B-roll`). User decisions update both Resolve + sidecar and move the clip into its confirmed category.
+## Visual inspector
 
-## Algorithm
+`inspect_clip(clip_path)` re-analyses a single clip for the UI's
+`ClassifyInspector`: it re-extracts the same 5 frames, draws cyan face boxes and
+a per-frame motion-intensity bar, and returns **base64 JPEG data URLs** plus the
+recomputed `face_ratio`, `motion_score`, and KNN label/confidence — no temp
+files survive the call.
 
-### 1. Audio extraction
+## Training (`tools/trainer.js`)
 
-Use vendored ffmpeg (`assets/bin/ffmpeg`) to decode audio to a temporary 16 kHz mono WAV. Silero VAD requires 16 kHz.
-
-```
-ffmpeg -i <clip> -ac 1 -ar 16000 -f wav -vn -y /tmp/cairn-<clip-id>.wav
-```
-
-Temporary files cleaned up after VAD completes. On failure, cleanup is guaranteed via `try/finally`.
-
-### 2. VAD
-
-Use Silero VAD (open source, ONNX runtime — runs locally with no network):
-
-```python
-import torch
-model, utils = torch.hub.load('snakers4/silero-vad', 'silero_vad')
-(get_speech_timestamps, _, read_audio, _, _) = utils
-wav = read_audio("/tmp/cairn-<id>.wav", sampling_rate=16000)
-ts = get_speech_timestamps(wav, model, threshold=0.5, sampling_rate=16000)
-```
-
-**Threshold:** start at `0.5` (Silero default). Lower = more permissive (more clips labelled A-roll); higher = more conservative (more Ambiguous).
-
-### 3. Ratio + decision
-
-```python
-total_speech = sum(s['end'] - s['start'] for s in ts)  # samples
-speech_ratio = total_speech / len(wav)                 # 0.0 – 1.0
-```
-
-**Classification thresholds** (tunable; start conservative):
-
-| `speech_ratio`        | Label       |
-| --------------------- | ----------- |
-| `≥ 0.60`              | `A-ROLL`    |
-| `≤ 0.05`              | `B-ROLL`    |
-| `0.05 < ratio < 0.60` | `AMBIGUOUS` |
-
-Rationale: the ambiguous middle captures clips with incidental chatter, studio walkthroughs, overheard voices, or clips where the mic picked up the interviewer's prompt but the interviewee hasn't started yet. Better to ask the user than silently mis-tag.
-
-Thresholds live in a single constants block at the top of `classify.py` and are documented in `AGENT.md` once tuned against the sample shoot.
-
-### 4. Silent clips
-
-If `speech_ratio == 0.0` and audio is genuinely silent (no detected speech segments), label `B-ROLL` — these are typically set-ups, pickups, cutaway shots.
-
-If audio file can't be extracted (e.g., clip has no audio stream), label `B-ROLL` and note `"vad.audio_stream": false` in the sidecar.
-
-### 5. Write
-
-**Sidecar first**, then Resolve: update `<clip-id>.json`, then call `SetMetadata("Keywords", …)` and `SetClipColor(…)` via the single Resolve worker.
-
-### 6. Review panel
-
-The UI queries all clips with `"classification": "AMBIGUOUS"` and renders them in a panel:
-
-- Thumbnail (from Resolve `GetClipProperty("Thumbnail")` or ffmpeg frame at 50%)
-- Filename
-- `speech_ratio` value (helps the user decide)
-- Two buttons: `A-roll` / `B-roll`
-- "Play in Resolve" button → sets playhead to clip start
-
-User confirmation writes `"classification": "<confirmed>"` and `"user_confirmed": true` into the sidecar, and updates Resolve.
+A standalone local tool generates a looping GIF preview per clip and lets the
+user label A-ROLL / B-ROLL / skip; confirmed examples (with feature vectors) are
+appended to `~/.cairn/ground_truth.json`. The classifier reads this file on the
+next run. More/better examples → fewer AMBIGUOUS results.
 
 ## Sensors / Validations
 
-- **VAD sanity test** (pytest): feed in a known speech-heavy WAV, assert `speech_ratio > 0.5`; feed in silence, assert `speech_ratio < 0.05`.
-- **Threshold stability test**: regression fixtures (5–10 real clips, ground-truth labels) — any threshold change must not regress accuracy more than 1 label.
-- **Resolve read-back**: after writing, re-query `Keywords` and `ClipColor`; assert they match what was written.
-- **No-network assertion**: `classify.py` runs offline. Test harness blocks outbound network and asserts pass.
-- **Idempotency**: second run on a classified clip is a no-op.
-- **Colour validity**: every colour string is validated against a known-good enum at call time; invalid colour → raise, never silently skip.
+- **Classifier eval harness** (`tests/python/test_classifier_evals.py`): a
+  held-out set with ground-truth labels; the suite asserts accuracy stays at or
+  above the regression gate (≈80%). Any constant change must not regress it.
+- **Idempotency**: a second run on a classified clip is a no-op (`clip_skipped`).
+- **Cold-start fallback**: with `< 5` examples, the rule path is used; tested.
+- **Resolve read-back**: after writing, re-query the metadata + clip colour and
+  assert they match (taste invariant — verify Resolve mutations).
+- **Colour validity**: every colour string is validated against the known
+  `SetClipColor` enum at call time; invalid colour → raise, never silently skip.
+- **No network**: `classify.py` performs no network I/O.
 
 ### Taste-invariant cross-checks
 
-- #1 / #2 (read-only on source): ffmpeg invocation uses `-i <clip>` with output to `/tmp` only. Source is never touched.
-- #3 (serial Resolve): classification loop extracts + VAD's in parallel (CPU-bound), but Resolve writes drain through the serial worker.
-- #7 (flag ambiguous): entire point of the Ambiguous category.
+- #1 / #2 (read-only source): frames extracted to a temp dir only; source clips
+  are never modified or deleted.
+- #3 (serial Resolve): frame extraction / face / motion are CPU-bound and may run
+  per-clip, but every Resolve write drains through the single serial worker.
+- #7 (flag ambiguous): low-confidence clips become `AMBIGUOUS` for user review —
+  the classifier never silently guesses.
 
 ## Open questions
 
-- **Ideal thresholds** — 0.60 / 0.05 are educated guesses. Calibrate against Aidan's sample shoot + two other projects before shipping.
-- **Silero VAD v4 vs v5** — v5 is newer but has occasional false-positives on music. Pin to v4 for now; revisit if misclassifications surface.
-- **Clips with music + dialogue** (e.g. interview with B-roll ambient mix) — VAD will flag as speech. Is that right? Probably yes for v1 (it _does_ have dialogue) — user can override via the review panel.
-- **Multi-track audio** (e.g. lav on track 1, shotgun on track 2) — current plan: downmix to mono. A smarter v2 could VAD each track separately and flag "dialogue on track 1 only" to inform later audio routing. Out of scope for v1.
-- **Long clips** (>10 min talking heads) — VAD runs in ~1–2 s per file per `spec.md`; verify against a 30-min test clip.
+- **Ground-truth volume** — KNN quality scales with labelled examples. How many
+  clips across how many shoots before AMBIGUOUS rates drop to comfortable levels?
+- **Feature set v2** — would adding shot-scale (face-box area fraction) or a
+  colour-temperature feature meaningfully separate edge cases? Evaluate via the
+  eval harness before adding.
+- **Per-camera priors** — A_CAM is usually A-roll, B_CAM/C_CAM usually B-roll.
+  Worth a weak prior, or does it bias too hard? Currently camera is not a feature.

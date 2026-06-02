@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 1. **Read `IMPLEMENTATION_PLAN.md` first.** It contains the current session's task list. Work top-to-bottom. Mark tasks done as you go.
 2. **Read `spec.md` before designing any feature.** It is the high-level product truth.
-3. **Read the relevant file in `specs/*.md` before building that feature.** Each pipeline stage has its own detailed spec.
+3. **Read the relevant file in `specs/*.md` before building that feature.** Each ACTIVE stage has its own spec (`overview`, `ingest`, `classify`). Specs for deferred stages 3-8 live in `docs/archive/specs/` — do not implement from them.
 4. **Read `fix_plan.md` if it exists.** It tracks known bugs, placeholder implementations, and outstanding TODOs across sessions.
 5. **Read `AGENT.md` if it exists.** It contains self-discovered build/run learnings — keep it brief and up to date.
 
@@ -89,6 +89,10 @@ Before implementing anything, search the codebase with subagents. Failure mode: 
 
 ### What Lives Where
 
+> Active today: clip classification, clip colour, and API keys. The transcript,
+> visual-tags, match-ID, notes, soundbite-marker and project-brief rows are
+> **deferred** (stages 3-8, see `docs/archive/`).
+
 | Data Type                           | Resolve           | Sidecar JSON              | Never                 |
 | ----------------------------------- | ----------------- | ------------------------- | --------------------- |
 | Clip classification (A/B/Ambiguous) | Keywords field    | `<clip>.json`             | —                     |
@@ -109,7 +113,7 @@ Before implementing anything, search the codebase with subagents. Failure mode: 
 
 ## Project
 
-**Cairn** — a DaVinci Resolve Workflow Integration Plugin. Organises footage, classifies A-roll vs B-roll, transcribes, tags B-roll visually, identifies soundbites, matches B-roll to story beats. Never cuts the video itself. See `spec.md` for the full product specification.
+**Cairn** — a DaVinci Resolve Workflow Integration Plugin. Organises footage, classifies A-roll vs B-roll (local KNN on face + motion), colour-codes the media pool, and builds a layered assembly timeline. Never cuts the video itself. Transcription, visual tagging, soundbite identification and B-roll matching are **deferred post-v1** (scope reset `966ce94`; specs in `docs/archive/`). See `spec.md` for the full product specification.
 
 **Owner:** Aidan Mascaro, Perth WA, freelance videographer (@aidanmascaro).
 **Coding level:** intermediate — can read and reason about code, prefers not to edit directly. Claude Code is responsible for all code. Explanations in plain English. Never ask the owner to edit code manually.
@@ -125,8 +129,9 @@ Before implementing anything, search the codebase with subagents. Failure mode: 
 - **Orchestration:** Node.js (TypeScript strict mode)
 - **Workers:** Python 3.11+ (bundled with plugin via PyInstaller)
 - **Resolve APIs:** JavaScript (`WorkflowIntegration.node`) + Python (Scripting API)
-- **AI APIs:** AssemblyAI Universal-2 (transcription), Anthropic Claude (brief, selection, vision)
-- **Local fallbacks:** faster-whisper (transcription), ffmpeg (frame extraction, probe)
+- **Vision / maths (current):** OpenCV (`opencv-python-headless`) + numpy for the classify stage; ffmpeg/ffprobe (vendored, `assets/bin/`) for probing + frame extraction
+- **AI APIs (deferred stages only):** AssemblyAI Universal-2 (transcription), Anthropic Claude (brief, selection, vision) — not called by any current worker; keys are accepted in Settings for when those stages return
+- **Local fallbacks (deferred):** faster-whisper (transcription)
 - **Type checkers:** TypeScript (strict), pyrefly (Python)
 - **Linters:** ESLint + Prettier (JS/TS), ruff (Python)
 - **Testing:** Vitest (JS/TS), pytest (Python)
@@ -165,36 +170,39 @@ cairn/
 ├── IMPLEMENTATION_PLAN.md         # Current session tasks
 ├── fix_plan.md                    # Living bug/TODO list
 ├── AGENT.md                       # Self-updated build/run learnings
-├── specs/
+├── pytest.ini                     # pytest rootdir + testpaths
+├── organise.py                    # v1 standalone CLI (ported into ingest.py)
+├── specs/                         # ACTIVE per-stage specs only
 │   ├── overview.md                # Architecture, visual system, out-of-scope
 │   ├── ingest.md                  # Stage 1 — organise + import
-│   ├── classify.md                # Stage 2 — VAD + clip colour
-│   ├── transcribe.md              # Stage 3 — AssemblyAI + Whisper
-│   ├── vision.md                  # Stage 4 — frame extraction + tagging
-│   ├── brief.md                   # Stage 5 — conversational brief
-│   ├── soundbites.md              # Stage 6 — soundbite identification + markers
-│   ├── matching.md                # Stage 7 — B-roll match (literal + thematic)
-│   └── sidebar.md                 # Stage 8 — UI cockpit
+│   └── classify.md                # Stage 2 — KNN (face + motion) + clip colour
+├── docs/
+│   └── archive/                   # DEFERRED stages 3-8 (not active) — see its README
+│       ├── specs/                 # transcribe, vision, brief, soundbites, matching, sidebar
+│       └── prompts/               # the 7 orphaned LLM prompts
 ├── manifest.xml                   # Plugin registration
-├── package.js                     # Plugin entry point
 ├── src/
-│   ├── ui/                        # Svelte UI
-│   ├── orchestrator/              # Node orchestration + API calls
-│   │   ├── resolve-bridge.ts      # Resolve JS API wrapper
-│   │   ├── python-bridge.ts       # Node↔Python stdin/stdout protocol
-│   │   └── prompts/               # ALL Claude prompts live here
+│   ├── ui/                        # Svelte UI (App, DropZone, ClassifyPanel,
+│   │                              #   ClassifyInspector, Settings, TimelinePanel)
+│   ├── orchestrator/              # Node orchestration
+│   │   ├── main.js                # Electron main + IPC + inline Resolve JS API
+│   │   ├── preload.js             # contextBridge trust boundary
+│   │   ├── python-bridge.ts       # typed Node↔Python stdin/stdout protocol
+│   │   └── prompts/               # Claude prompts (only .gitkeep until AI stages return)
 │   └── workers/                   # Python workers
-│       ├── ingest.py              # Ported from organise.py
-│       ├── classify.py            # Silero VAD
-│       ├── transcribe.py          # AssemblyAI + Whisper
-│       ├── vision.py              # Claude vision client
-│       ├── resolve_api.py         # Python side of Resolve API
+│       ├── bridge.py              # IPC dispatcher (entry point)
+│       ├── ingest.py              # Stage 1 — organise + Resolve import
+│       ├── classify.py            # Stage 2 — KNN face + motion (local, no network)
+│       ├── resolve_api.py         # Resolve scripting + clip colour writes
+│       ├── resolve_import.py      # legacy import fallback (slated for removal)
+│       ├── timeline.py            # Stage 4 — build assembly timeline
 │       └── sidecar.py             # Sidecar JSON read/write
 ├── tests/
 │   ├── node/                      # Vitest
 │   └── python/                    # pytest
-├── assets/                        # ffmpeg binary, icons, sample data
-└── packaging/                     # Electron-builder config, signing certs
+├── tools/                         # trainer.js (KNN labelling), enrich_gt.py
+├── assets/                        # ffmpeg/ffprobe binaries, icons
+└── packaging/                     # PyInstaller spec, electron-builder, installers
 ```
 
 ---

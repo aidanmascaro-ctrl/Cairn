@@ -63,6 +63,39 @@ Each entry:
 
 ---
 
+## 2026-06-02 — restructure pass follow-ups
+
+Items surfaced during the program analysis / scope-reset hygiene pass (post `966ce94`). The current pipeline is 4 stages: INGEST (`src/workers/ingest.py`) → CLASSIFY (`src/workers/classify.py`, KNN on `face_ratio` + `motion_score`, `classifier_version "v3-knn-face-motion"`) → COLOUR (inline in `src/workers/resolve_api.py`) → BUILD ASSEMBLY TIMELINE (`src/workers/timeline.py`). These follow-ups are intentionally NOT done in this pass; they are logged so a future session can pick them up.
+
+### Packaging smoke test (validation gap — must run a real build)
+
+- [ ] **Run a real PyInstaller build on the target arch and smoke-test the bundled binary.** `packaging/workers.spec` was corrected by reading (cv2 now pulled in via `collect_data_files`, `timeline` added to `hiddenimports`, phantom/removed modules deleted), but a spec edit CANNOT be validated by reading alone. Build the bundle and verify both `classify` and `build_timeline` commands work end-to-end inside the bundled binary (not just from source).
+- [ ] **Confirm bundled binary size is acceptable now that `cv2` (opencv-python-headless) is included.** Record the size delta vs. the pre-cv2 bundle and confirm it is within distribution expectations.
+
+### PR#2 — restructure (deferred from this hygiene pass)
+
+- [ ] **Split `src/orchestrator/main.js` (861 lines).** Extract into `resolve-bridge.js` (the inline Resolve JS-API wrapping — currently inline in `main.js`, a known tech-debt item) + a `handlers/` directory. Note: there is currently NO `package.js` and NO `resolve-bridge.ts`.
+- [ ] **Split `src/workers/resolve_api.py` (744 lines) and expose a public `resolve_lock()` contextmanager.** `src/workers/timeline.py` currently reaches into the private `_acquire_lock` / `_release_lock` — give it a public, supported locking contract instead. (Taste invariant #3: all Resolve calls must be serialised through a single worker — the lock is load-bearing.)
+- [ ] **Extract `src/workers/constants.py`.** `VIDEO_EXTS` / `PHOTO_EXTS` / `SONY_SHELLS` / `TEMPLATE_DIRS` are copy-pasted across 4 files with a LIVE divergence: `ingest.py` includes `.xmp` but `resolve_api.py` and `resolve_import.py` do NOT, so Resolve import silently skips `.xmp` sidecars. Centralising fixes the divergence (and is a correctness bug, not just cleanup).
+- [ ] **Extract `classify.py`'s `inspect_clip` into `src/workers/inspect.py`.**
+- [ ] **Adopt the typed `PythonBridge` (`src/orchestrator/python-bridge.ts`) in `main.js` instead of the inline shim.** Prerequisites first: (a) close the Zod schema gaps for the `health_check` and `classify_inspect` messages, and (b) fix the `import.meta.url` `scriptPath` default that breaks under CommonJS `require()`.
+- [ ] **Route the legacy `src/workers/resolve_import.py` fallback through `bridge.py`, then delete it.** As a separate one-shot process it can race the non-thread-safe Resolve Scripting API — a direct violation of taste invariant #3. It is already slated for removal.
+
+### Latent correctness bugs (own fixes + tests — NOT part of the restructure)
+
+- [ ] **`sidecar` `clip_id = sha256(absolute_path)[:16]` breaks idempotency on re-ingest.** When ingest renames the shoot folder, the absolute path changes, so the clip hashes to a new `clip_id` and re-ingest no longer matches the existing sidecar. Needs a path-stable identity (and a regression test).
+- [ ] **`sidecar.write_clip` / `merge_clip` use non-atomic `Path.write_text` (truncate-then-write).** A crash mid-write corrupts the sidecar. Switch to tmp-file-then-`os.replace` (atomic). (Supports taste invariant #6: sidecar-first must be recoverable from corruption.)
+- [ ] **Add unit coverage for production paths.** Create `tests/python/test_resolve_api.py` + `tests/python/test_bridge.py` — these production paths currently have ZERO unit coverage.
+
+### Security / dependencies (separate follow-up)
+
+- [ ] **Plan an Electron upgrade.** Electron 30 has 11 known HIGH CVEs. This is a breaking upgrade — validate the new version against Resolve's plugin host before shipping.
+- [ ] **Re-enable ASAR with integrity.** `packaging/electron-builder.json5` currently sets `asar: false`; restore ASAR-with-integrity once the Electron upgrade is validated.
+- [ ] **Add a strict CSP to `src/ui/index.html`.**
+- [ ] **Extend path validation across all handlers.** `ingest.py`'s `preflight()` path validation is not applied to the `classify`, `build_timeline`, `classify_confirm`, and `classify_inspect` handlers in `src/workers/bridge.py` — extend it so every handler validates untrusted paths.
+
+---
+
 ## Resolved
 
 _No entries yet._

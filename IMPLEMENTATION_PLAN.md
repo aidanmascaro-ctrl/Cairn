@@ -1,20 +1,46 @@
 # IMPLEMENTATION PLAN
 
-## Scope (post April-2026 reset)
+> **SCOPE RESET — read this before doing anything (commit `966ce94`).**
+>
+> The product is **four stages**, not nine. Stages 3–8 (transcribe, vision,
+> brief, soundbites, matching, sidebar cockpit) and the Silero-VAD classifier
+> were **stripped** in the `966ce94` scope reset and their specs/prompts moved to
+> `docs/archive/`. They are **DEFERRED (post-v1)**, not abandoned.
+>
+> **DO NOT implement anything in the `## DEFERRED — post-v1` section at the
+> bottom of this file.** A future Claude session reading top-to-bottom should
+> only act on the active task list above that divider. The deferred task blocks
+> are quarantined there purely so they are not lost — treat them as archival.
+>
+> Outstanding _current_ engineering work (e.g. the PR#2 restructure) is tracked
+> in `fix_plan.md`, **not** here.
 
-The product is **four steps**, not nine. Story-assistant features are out of
-scope. See `~/.claude/projects/-Users-aidanmascaro-Documents-Cairn/memory/feedback_scope_reset.md`.
+## Scope — the four shipped stages
 
-1. **Ingest** — drag folder → organise on disk → import to Resolve bins ✅
-2. **Classify** — vision-based KNN (face detection + motion score), with
-   per-clip ambiguous review in the UI ✅
-3. **Color-code** — write Keywords + SetClipColor in the Resolve media pool ✅
-   (handled inline by `resolve_api.classify_write_resolve`)
-4. **Build assembly timeline** — new timeline at modal resolution/fps;
-   A-roll on V1/A1, B-roll on V2/A2; ambiguous skipped ✅
+The pipeline that exists today is four stages. Classification is **100% local**
+(OpenCV + vendored ffmpeg); **no AI APIs are called at runtime**. AssemblyAI /
+Anthropic keys in Settings are kept only for the deferred stages / future use.
 
-Anything in older sessions that mentions transcribe, brief, soundbites,
-matching, or sidebar is **out of scope** — preserved below for archival.
+1. **Ingest** (`src/workers/ingest.py`) — drag folder → organise on disk
+   (YYMMDD rename, TEMPLATE tree, bucket files, idempotent re-ingest) → import
+   to Resolve bins → write sidecar JSON ✅
+2. **Classify** (`src/workers/classify.py`) — KNN (k=5, confidence ≥ 0.70) on
+   two **local** features: `face_ratio` (OpenCV Haar cascade over 5 sampled
+   frames) and `motion_score` (mean normalised frame-to-frame pixel diff).
+   Fallback rule (`face_ratio >= 0.40 → A-ROLL`) only when < 5 ground-truth
+   examples in `~/.cairn/ground_truth.json`. Low confidence → AMBIGUOUS (user
+   review). Audio is **intentionally not used**. `classifier_version`
+   `"v3-knn-face-motion"`. Fully offline. ✅
+3. **Color-code** (inline in `src/workers/resolve_api.py`, **not** a separate
+   worker) — A-ROLL→Blue, B-ROLL→Green, AMBIGUOUS→Yellow via `SetClipColor`;
+   also writes Resolve custom metadata "Cairn Classification" + `AddFlag`. ✅
+4. **Build assembly timeline** (`src/workers/timeline.py`) — new timeline at
+   modal resolution/fps inferred from the media pool; A-roll on V1/A1, B-roll
+   on V2/A2 via a track-lock protocol; AMBIGUOUS clips skipped. ✅
+
+Anything in older sessions that mentions Silero VAD, transcribe, vision, brief,
+soundbites, matching, or the sidebar cockpit is **DEFERRED (post-v1)** — see the
+quarantined `## DEFERRED — post-v1` section at the bottom and `docs/archive/`.
 
 ## Session Goal
 
@@ -56,7 +82,7 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 
 - [x] `specs/overview.md` — distilled from spec.md: visual system, distribution architecture, out-of-scope, architecture diagram
 - [x] `specs/ingest.md` — three input modes, port of `organise.py`, Resolve bin creation, XML metadata extraction, proxy toggle
-- [x] `specs/classify.md` — Silero VAD thresholds, clip colour mapping, ambiguous review panel
+- [x] `specs/classify.md` — clip colour mapping + ambiguous review panel _(later rewritten from the Silero-VAD design to the shipped KNN face+motion classifier)_
 - [x] `specs/transcribe.md` — AssemblyAI request/response schemas, Whisper fallback, subtitle track format, JSON sidecar schema
 - [x] `specs/vision.md` — frame extraction timing strategy (first, 25%, 50%, 75%, end), Claude vision prompt, structured tag output schema
 - [x] `specs/brief.md` — conversation flow, question order, brief JSON schema, editable-brief mechanics
@@ -113,7 +139,7 @@ The single `spec.md` is the product overview. Each pipeline stage needs its own 
 By end of session, this must be true:
 
 1. Repo is initialised, all harness docs in place
-2. `specs/*.md` exist for all eight pipeline stages
+2. `specs/*.md` exist for the pipeline stages (originally 8; post-`966ce94` only the 3 active specs remain in `specs/` — `overview`/`ingest`/`classify` — the others are in `docs/archive/specs/`)
 3. Plugin loads in Resolve and can read the project name
 4. Node↔Python bridge passes an echo test via CI
 5. All sensors (typecheck, lint, tests) run green on `main`
@@ -203,258 +229,32 @@ Session 2 begins with: "Implement Stage 1 (ingest) per `specs/ingest.md`" — no
 
 ## Session 3: Stage 1 Close-out + Stage 2 — Classify
 
+> **NOTE (post `966ce94`):** Stage 2 classify **shipped**, but as a local
+> **KNN classifier on `face_ratio` + `motion_score`** — _not_ the Silero-VAD /
+> `speech_ratio` design the original Session 3 task blocks describe. The
+> superseded VAD task blocks (old Tasks 1–7 and their success criteria) have
+> been moved to the `## DEFERRED — post-v1` section at the bottom under
+> "Stage 2 classify — original Silero-VAD design (superseded by KNN)". Only the
+> Stage 1 close-out pre-flight below is live outstanding work.
+
 ### Pre-flight: close out Stage 1 open items
 
 - [ ] Rebuild plugin (dist/ was root-owned from prior sudo install):
       `sudo chown -R $(whoami) dist && npm run build && sudo bash packaging/install-dev-plugin.sh`
 - [ ] Restart Resolve; open a project; run ingest on an already-organised folder that has `01_VIDEOS/A_CAM`, `01_VIDEOS/C_CAM`, `02_PHOTOS` populated
-- [ ] Verify **bin structure** appears in media pool: `<shoot>/01_VIDEOS/A_CAM/`, `/C_CAM/`, `/02_PHOTOS/` — this tests `resolve_import.py`'s `_find_or_create()` approach
+- [ ] Verify **bin structure** appears in media pool: `<shoot>/01_VIDEOS/A_CAM/`, `/C_CAM/`, `/02_PHOTOS/` — this tests the bin `_find_or_create()` approach (note: `resolve_import.py` is a legacy one-shot fallback slated for removal; the live import path is inline in `main.js`)
 - [ ] Verify **Photomator Edit Documents** (`DSC00816`-style extension-less files) land in `02_PHOTOS` — confirms fix in `ingest.py`
 - [ ] Verify **empty shell folders** (`DCIM`, `M4ROOT`, `drone`) are trashed — confirms `send2trash` cross-volume fix
 - [ ] If any Stage 1 item still fails, add a narrow targeted fix and retest; update `fix_plan.md`
 - [ ] Once all three confirmed, mark them Resolved in `fix_plan.md`
 
-### Task 1: Python dependency check for Silero VAD
-
-- [ ] Test `silero-vad` install on Python 3.14: `pip install silero-vad`
-  - If wheel missing for 3.14: install `pyenv`, create 3.12 venv, pin `CAIRN_PYTHON` env var; document in `AGENT.md`
-  - Confirm `torch` and `onnxruntime` also install cleanly (silero-vad pulls them as deps)
-- [ ] Confirm vendored ffmpeg at `assets/bin/ffmpeg` is present and executable
-  - If absent: download a macOS static ffmpeg build and place at `assets/bin/ffmpeg`; update `.gitignore` to exclude binaries > 50 MB but keep the path declaration in `AGENT.md`
-- [ ] Add `silero-vad` to `src/workers/requirements.txt`
-- [ ] Smoke-test: `python3 -c "import silero_vad; print('ok')"` inside the target Python env
-
-### Task 2: `src/workers/classify.py`
-
-Full implementation per `specs/classify.md`. No placeholders.
-
-- [ ] Constants block at top (single source of truth for tunable values):
-
-  ```python
-  AROLL_THRESHOLD  = 0.60   # speech_ratio >= this → A-ROLL
-  BROLL_THRESHOLD  = 0.05   # speech_ratio <= this → B-ROLL
-  VAD_THRESHOLD    = 0.5    # silero confidence threshold
-  SAMPLING_RATE    = 16_000
-  MODEL_NAME       = "silero_vad"
-  MODEL_VERSION    = "v4"
-  ```
-
-- [ ] `extract_audio(clip_path: str, tmp_dir: Path) -> Path`: runs vendored ffmpeg
-      `-ac 1 -ar 16000 -f wav -vn -y`; raises `AudioExtractionError` on non-zero exit;
-      `try/finally` guarantees temp file cleanup even on exception
-- [ ] `run_vad(wav_path: Path) -> dict`: loads silero model (cached after first call),
-      returns `{speech_ratio: float, speech_segments: list[tuple], model_version: str}`
-- [ ] `classify_clip(speech_ratio: float) -> str`: returns one of `A-ROLL`, `B-ROLL`, `AMBIGUOUS`
-- [ ] `classify_all(clip_paths: list[str], sidecar_root: str) -> Iterator[dict]`: generator,
-      skips already-classified clips, yields one progress dict per clip (file, label, speech_ratio)
-- [ ] Idempotency: read sidecar, skip if `"classify" in stages_complete`
-- [ ] Sidecar update: merge `{classification, vad, stages_complete}` then call `sidecar.write_clip()`
-- [ ] No network calls. No Resolve calls. Pure local Python.
-
-### Task 3: Extend `resolve_api.py` for classify writes
-
-- [ ] Add `VALID_CLIP_COLORS` set — the full list of SetClipColor valid values for Resolve
-      (Blue, Cyan, Green, Yellow, Red, Pink, Purple, Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream, Orange — confirm against Resolve Python API reference via context7)
-- [ ] `set_clip_color(clip: Any, color: str) -> None`: validates against `VALID_CLIP_COLORS`;
-      raises `ValueError` with the full valid-values list if invalid; calls `clip.SetClipColor(color)`
-- [ ] `get_clip_by_path(media_pool: Any, file_path: str) -> Any | None`: look up a MediaPoolItem
-      by its `File Path` property, searching `A_CAM`, `B_CAM`, `C_CAM` bins
-- [ ] `classify_write_resolve(media_pool: Any, clip_path: str, label: str) -> bool`:
-      acquires lock, finds clip, writes Keywords = label, sets clip colour; returns False if clip not found (log warning, don't raise)
-- [ ] Add to `ingest_into_resolve` lock already present — no concurrent classify + ingest calls possible
-
-### Task 4: Bridge extension for classify streaming
-
-- [ ] `bridge.py`: add `handle_classify` streaming handler
-  - Payload: `{path: str, dry_run?: bool}` — path is the organised shoot folder
-  - Per-clip: yields `{event: "clip_classified", file, label, speech_ratio}`
-  - On completion: yields `{event: "classify_complete", a_roll: N, b_roll: N, ambiguous: N}`
-- [ ] `python-bridge.ts`: add `classify` outbound type, `ClassifyProgress` + `ClassifyResult` inbound types
-- [ ] `main.js`: add `cairn:classify` IPC handler — spawns via `callPython`, streams progress to renderer, writes Resolve clips via `classify_write_resolve` (through a second IPC round-trip so Resolve writes stay in the main process)
-
-  **Note:** Resolve API calls happen inside `main.js` (JS WorkflowIntegration) or via `resolve_import.py`-style subprocess, not inside `bridge.py`. Architecture: Python classifies + writes sidecars → sends results → Node side calls `classify_write_resolve` for each clip. Serialise all Resolve writes through the existing `resolveApiQueue` if one exists, or guard with a mutex.
-
-- [ ] `preload.js`: expose `cairn.classify({path, onProgress})`
-- [ ] `types.ts`: add `ClassifyPayload`, `ClassifyProgressEvent`, `ClassifyResult`
-
-### Task 5: Classify panel UI (`src/ui/ClassifyPanel.svelte`)
-
-- [ ] Trigger button: "Classify clips" (enabled only after ingest is done for a folder)
-- [ ] Progress bar + per-clip status line (clip name, label badge A/B/AMBIGUOUS, speech_ratio %)
-- [ ] Summary on completion: "12 A-roll / 34 B-roll / 3 Ambiguous"
-- [ ] **Ambiguous review sub-panel**: list of AMBIGUOUS clips with:
-  - Filename
-  - speech_ratio percentage
-  - Thumbnail (from ffmpeg frame at 50% — `assets/bin/ffmpeg -ss <mid> -i <clip> -frames:v 1 -q:v 5 -y /tmp/thumb-<id>.jpg`)
-  - Two buttons: "A-roll ▲" / "B-roll ▼"
-  - User confirmation: updates sidecar `{classification, user_confirmed: true}` + Resolve via `classify_write_resolve`
-- [ ] Add `<ClassifyPanel>` to `App.svelte` below the DropZone card; shown once `ingestResult` is non-null
-
-### Task 6: pytest suite for classify
-
-- [ ] `tests/python/test_classify.py`:
-  - **Audio extraction**: mock ffmpeg, assert temp file path and cleanup
-  - **VAD sanity**: feed a 1-second sine wave (speech-like) → `speech_ratio > 0`; feed silence → `speech_ratio == 0.0`
-  - **Threshold logic**: parameterised tests for boundary values (0.04 → B-ROLL, 0.05 → B-ROLL, 0.06 → AMBIGUOUS, 0.60 → A-ROLL, 0.61 → A-ROLL)
-  - **Idempotency**: clip with `"classify" in stages_complete` is skipped (no ffmpeg call)
-  - **No-network assertion**: test harness blocks outbound with `pytest-httpserver` or socket mock; classify must pass
-  - **Sidecar merge**: assert `stages_complete` gains `"classify"` without losing `"ingest"`
-- [ ] All tests `tmp_path`-scoped
-
-### Task 7: Sensors green + commit
-
-- [ ] `ruff check src/workers/classify.py` → 0 errors
-- [ ] `pyrefly check src/workers/classify.py` → 0 errors
-- [ ] `pytest tests/python/test_classify.py` → all green
-- [ ] `npm run typecheck && npm run lint && npm run test` → all green
-- [ ] Update `AGENT.md`: record silero VAD model cache location, ffmpeg path, any Resolve `SetClipColor` valid-values finding
-- [ ] Commit: `feat: Stage 2 classify — Silero VAD, clip colour, ambiguous review`
-- [ ] Tag: `v0.2.0`
-
 ---
 
-## Session 3 Success Criteria
-
-1. Run classify on an organised shoot folder → every video clip gets A-ROLL/B-ROLL/AMBIGUOUS label
-2. Resolve media pool shows clip colours: Blue for A-roll, Green for B-roll, Yellow for ambiguous
-3. Ambiguous clips appear in the review panel with thumbnails; A/B buttons update Resolve + sidecar live
-4. Sidecar JSON updated with `vad` block and `"classify"` in `stages_complete`
-5. All sensors green
-
----
-
-## Session 4: Stage 3 — Transcribe (high-level)
-
-See `specs/transcribe.md` for full detail.
-
-### Session 4 tasks (expand into sub-tasks at Session 4 start)
-
-- [ ] `src/workers/transcribe.py`: AssemblyAI SDK client, speaker labels, word-level JSON → sidecar shape
-- [ ] SRT writer: `utterances[]` → `04_EXPORT/.cairn/subtitles/<clip-id>.srt`
-- [ ] `resolve_api.py` extension: `attach_subtitle(clip, srt_path)` calling `clip.AddSubTitle`
-- [ ] `faster-whisper` fallback (gated on `cloud_transcription_allowed: false` in brief; NDA path)
-- [ ] Bridge handler `handle_transcribe`; IPC `cairn:transcribe`
-- [ ] `TranscribePanel.svelte`: per-clip progress, cost estimate before batch (AssemblyAI minutes), speaker labelling UI
-- [ ] Idempotency: skip if sidecar has matching `provider` + `provider_model`
-- [ ] Bill-safety test: two consecutive runs → exactly one API call (mock AssemblyAI client)
-- [ ] Commit: `feat: Stage 3 transcribe — AssemblyAI + Whisper fallback, subtitle track`; tag `v0.3.0`
-
-### Pre-Session 4 decision needed
-
-- Confirm `clip.AddSubTitle(path)` is the correct Python API call for attaching an SRT as a subtitle track — verify via DaVinci Resolve scripting docs before the session starts.
-
----
-
-## Session 5: Stage 4 — Vision (high-level)
-
-See `specs/vision.md` for full detail.
-
-### Session 5 tasks
-
-- [ ] `src/workers/vision.py`: ffmpeg 5-frame extraction, Claude vision API call via `tag_broll` tool, tag validation, frame cleanup
-- [ ] Prompt: `src/orchestrator/prompts/vision_tag.md` (meta-reasoning block mandatory)
-- [ ] `resolve_api.py` extension: `set_keywords(clip, keywords_str)` — write to `Keywords` field via `SetMetadata`
-- [ ] Bridge handler + IPC + UI panel with cost estimate (tokens × clips)
-- [ ] LLM-as-judge loop-back: 10% sample re-scored, low-confidence tags surfaced in UI
-- [ ] Local vision fallback (NDA path) — if significant lift, defer to `fix_plan.md` and ship cloud-only
-- [ ] Commit: `feat: Stage 4 vision — 5-frame extraction, Claude tagging, Resolve keywords`; tag `v0.4.0`
-
-### Pre-Session 5 decisions
-
-- Tool use (`tag_broll`) vs JSON-in-text: default to tool use.
-- Frame count scaling for long clips: start at 5 flat; revisit after sample shoot.
-
----
-
-## Session 6: Stage 5 — Project Brief (high-level)
-
-See `specs/brief.md` for full detail.
-
-### Session 6 tasks
-
-- [ ] `src/orchestrator/prompts/brief_system.md` and `brief_finalise.md`
-- [ ] `BriefPanel.svelte`: conversational chat UI (message list, input box), live JSON progress ("4/9 fields"), Edit / Start Over modes
-- [ ] Node orchestration: `cairn:brief:message` IPC → Claude `messages.create` with `update_brief_draft` + `finalise_brief` tools → returns updated draft JSON
-- [ ] Write `brief.json` to `04_EXPORT/.cairn/brief.json`
-- [ ] LLM-as-judge on finalisation: second call scores accuracy of extraction
-- [ ] Gate Stages 6–7 on `brief.json` with `finalised: true`
-- [ ] Commit: `feat: Stage 5 brief — conversational brief panel`; tag `v0.5.0`
-
-### Architecture note
-
-Brief can be filled **in parallel** with Stages 1–4 (the brief chat doesn't depend on transcripts or vision tags being complete). Open the brief panel once ingest is done; only Stages 6–7 are gated on both indexing + brief being complete.
-
----
-
-## Session 7: Stage 6 — Soundbites (high-level)
-
-See `specs/soundbites.md` for full detail.
-
-### Session 7 tasks
-
-- [ ] `src/orchestrator/prompts/soundbite_select.md` (meta-reasoning block + beat-type defs)
-- [ ] `src/orchestrator/prompts/soundbite_judge.md`
-- [ ] Node orchestration: for each A-roll clip, read transcript + brief → Claude `propose_soundbites` tool → judge pass → write markers
-- [ ] `resolve_api.py` extension: `add_clip_marker(clip, frame, color, name, note, duration, custom_data)` and `clear_cairn_markers(clip)` (by customData prefix)
-- [ ] Frame conversion: `sec → frame` using clip FPS from `GetClipProperty("FPS")`
-- [ ] Sidecar: soundbites array written before Resolve marker calls
-- [ ] Beat-type → colour mapping validated at call time
-- [ ] `SoundbitesPanel.svelte`: progress + review panel for `judge_score < 0.6` flagged bites
-- [ ] Commit: `feat: Stage 6 soundbites — selection, judge pass, Resolve markers`; tag `v0.6.0`
-
-### Pre-Session 7 verification needed
-
-- Confirm `MediaPoolItem.AddMarker(frameId, color, name, note, duration, customData)` signature in Python API — check via context7 before coding. If customData not supported, find the correct overload.
-
----
-
-## Session 8: Stage 7 — B-roll Matching (high-level)
-
-See `specs/matching.md` for full detail.
-
-### Session 8 tasks
-
-- [ ] `src/orchestrator/prompts/match_broll.md` (meta-reasoning block, literal/thematic defs)
-- [ ] `src/orchestrator/prompts/match_judge.md`
-- [ ] Build B-roll library summary: one line per clip from vision sidecar tags
-- [ ] For each soundbite: Claude `propose_matches` tool → judge pass → drop `judge_score < 0.6`
-- [ ] `resolve_api.py` extension: `set_shot_field(clip, value)` + `set_description_field(clip, value)` — confirm Resolve field names (`Shot`, `Description`) via Python API reference
-- [ ] A-roll marker note append: `MATCHES:` line, preserving existing marker content
-- [ ] Sidecars: B-roll + A-roll updated before any Resolve write
-- [ ] `MatchingPanel.svelte`: per-soundbite coverage, zero-match bites flagged, rejected-match log
-- [ ] Commit: `feat: Stage 7 matching — literal/thematic B-roll to soundbite pairing`; tag `v0.7.0`
-
-### Resolve API risk to resolve early
-
-- `MediaPoolItem.SetMetadata("Shot", …)` — confirm `Shot` is a writable field in the scripting API. If not, use a custom metadata key and document the fallback in `AGENT.md`.
-
----
-
-## Session 9: Stage 8 — Sidebar Cockpit (high-level)
-
-See `specs/sidebar.md` for full detail.
-
-### Session 9 tasks
-
-- [ ] `SidebarPanel.svelte`: story map component showing all soundbites (by beat colour), B-roll match badges, click-to-jump
-- [ ] Click-to-jump → `cairn.resolve.jumpToClip(clip_id, frame)` IPC → `GetCurrentTimeline().SetCurrentVideoClipIndex()` or equivalent
-- [ ] B-roll preview panel: hover/click shows matched clips with their tags and thumbnail
-- [ ] Project state indicator: which stages complete for current project, what's pending
-- [ ] Commit: `feat: Stage 8 sidebar — story map cockpit UI`; tag `v0.8.0`
-
----
-
-## Session 10: Packaging + Code Signing (high-level)
-
-### Session 10 tasks
-
-- [x] Mac: `packaging/build-mac.sh` — codesign + drag-install DMG + notarize; requires Apple Developer ID cert + notarytool credentials
-- [x] Windows: `electron-builder` NSIS installer via `packaging/electron-builder.json5`; custom `installer.nsh` sets install dir to Resolve plugin folder; standard code signing cert
-- [x] PyInstaller bundle: `packaging/workers.spec` → single `workers` binary; `getWorkersPath()` in `main.js` checks `resources/workers[.exe]` (prod) → `packaging/dist/workers[.exe]` (dev) → Python script fallback
-- [x] Entitlements: `packaging/entitlements.mac.plist` with hardened runtime flags for Python/ONNX Runtime
-- [x] Version bumped to `1.0.0-rc1` in `package.json` + `manifest.xml`
-- [ ] Smoke-test: install on a clean macOS machine (no Python, no Node) — plugin must load and full pipeline must run (requires Apple Developer cert to notarize — deferred until cert obtained)
-- [x] Commit: `chore: packaging + installers — PyInstaller bundle, Mac DMG, Windows NSIS, v1.0.0-rc1`; tag `v1.0.0-rc1`
+> **Sessions 4–10 (transcribe, vision, brief, soundbites, matching, sidebar
+> cockpit, and the original Session-10 packaging plan) are DEFERRED.** They have
+> been moved verbatim to the `## DEFERRED — post-v1` section at the bottom of
+> this file. Do not implement them. The active task list continues below with
+> Session 11 (harness polish on the four shipped stages).
 
 ---
 
@@ -597,7 +397,13 @@ Work top-to-bottom. Each task must leave sensors green before moving to the next
 
 ---
 
-### Task 6: Fix `resolve_api.py` — atomic marker update
+### Task 6: Fix `resolve_api.py` — atomic marker update — DEFERRED
+
+> **DEFERRED (post-v1):** `update_marker_note` / `add_clip_marker` serve the
+> deferred **soundbites** stage. None of the 4 shipping stages write clip markers
+> (classify uses `SetClipColor` + `AddFlag` + the `Cairn Classification` metadata
+> key; timeline uses tracks). The data-loss bug below is real but dormant — fix it
+> when soundbites is revived (see `docs/archive/specs/soundbites.md`).
 
 **Why:** `update_marker_note` deletes the marker before attempting `AddMarker`. If `AddMarker` fails, the original marker is permanently destroyed. This is a data-loss bug.
 
@@ -685,7 +491,7 @@ Closes all four open items in `fix_plan.md` from Session 2.
 2. A Resolve write failure during classify shows `"⚠ N clips not updated in Resolve"` — not silent success
 3. `svelte-check` at Stop gate catches any future unhandled `ClassifyProgressEvent` branch
 4. `build_timeline_result.warnings` includes a message if `SetTrackLock` failed — timeline structure is transparent
-5. Marker update is safe: if `AddMarker` fails after `DeleteMarkerAtFrame`, the original marker is restored
+5. _(DEFERRED — soundbites stage)_ Marker update is safe: if `AddMarker` fails after `DeleteMarkerAtFrame`, the original marker is restored
 6. KNN eval suite: 97 existing tests + new eval tests all pass; accuracy on fixture set ≥ 90%
 7. All four `fix_plan.md` items from Session 2 marked Resolved after live plugin smoke-test
 
@@ -693,11 +499,295 @@ Closes all four open items in `fix_plan.md` from Session 2.
 
 ## Rules for Every Session
 
-1. Read `spec.md` and the relevant `specs/*.md` before designing any feature
+1. Read `spec.md` and the relevant current `specs/*.md` before designing any feature (specs for the deferred stages live in `docs/archive/`, not `specs/`)
 2. One task `in_progress` at a time
 3. Resolve-first + sidecar JSON — never store plugin state elsewhere
-4. All Claude prompts live in `src/orchestrator/prompts/` — never inline in routes or components
+4. Classification is local-only (OpenCV + ffmpeg); no AI API is called at runtime today. Deferred-stage prompts were archived — `src/orchestrator/prompts/` now holds only `.gitkeep`. Any _future_ Claude prompt lives there, never inline in routes or components
 5. Never implement placeholders — full implementations or flag in `fix_plan.md`
 6. Never modify source media files under any circumstances
 7. Commit only when explicitly asked or a task is fully complete with sensors green
 8. Update `AGENT.md` when you discover a new build/run command or Resolve quirk — keep it brief
+
+---
+
+---
+
+## DEFERRED — post-v1 (do NOT implement; stripped in 966ce94)
+
+> **Everything below this divider is quarantined.** These task blocks were
+> stripped in the `966ce94` scope reset. They are preserved verbatim so the
+> intent is not lost, but a session working top-to-bottom **must stop at this
+> divider**. Do **not** rebuild any of this. The detailed specs/prompts for
+> these stages now live in `docs/archive/`.
+>
+> Contents:
+>
+> 1. Stage 2 classify — original Silero-VAD design (superseded by the shipped
+>    KNN `face_ratio` + `motion_score` classifier; here for history only)
+> 2. Session 4 — Stage 3 transcribe (AssemblyAI Universal-2 + faster-whisper)
+> 3. Session 5 — Stage 4 vision (Claude frame tagging)
+> 4. Session 6 — Stage 5 conversational project brief
+> 5. Session 7 — Stage 6 soundbites (Claude selection + Resolve markers)
+> 6. Session 8 — Stage 7 B-roll matching (literal + thematic)
+> 7. Session 9 — Stage 8 sidebar cockpit / story map
+> 8. Session 10 — original packaging + code-signing plan (largely done; see
+>    Carry-Forward for the live packaging status)
+
+---
+
+### DEFERRED · Stage 2 classify — original Silero-VAD design (SUPERSEDED by KNN)
+
+> The shipped classifier is local KNN on `face_ratio` + `motion_score` (see the
+> Scope section at the top). The Silero-VAD / `speech_ratio` design below was
+> the original Session 3 plan and is **not** what runs today. Kept for history.
+
+#### Task 1: Python dependency check for Silero VAD
+
+- [ ] Test `silero-vad` install on Python 3.14: `pip install silero-vad`
+  - If wheel missing for 3.14: install `pyenv`, create 3.12 venv, pin `CAIRN_PYTHON` env var; document in `AGENT.md`
+  - Confirm `torch` and `onnxruntime` also install cleanly (silero-vad pulls them as deps)
+- [ ] Confirm vendored ffmpeg at `assets/bin/ffmpeg` is present and executable
+  - If absent: download a macOS static ffmpeg build and place at `assets/bin/ffmpeg`; update `.gitignore` to exclude binaries > 50 MB but keep the path declaration in `AGENT.md`
+- [ ] Add `silero-vad` to `src/workers/requirements.txt`
+- [ ] Smoke-test: `python3 -c "import silero_vad; print('ok')"` inside the target Python env
+
+#### Task 2: `src/workers/classify.py` (VAD version)
+
+Full implementation per the original VAD-era classify spec. NOTE: this VAD design was **superseded** — the shipped `specs/classify.md` documents the KNN face+motion classifier; the old VAD spec exists only in git history before `966ce94`. No placeholders.
+
+- [ ] Constants block at top (single source of truth for tunable values):
+
+  ```python
+  AROLL_THRESHOLD  = 0.60   # speech_ratio >= this → A-ROLL
+  BROLL_THRESHOLD  = 0.05   # speech_ratio <= this → B-ROLL
+  VAD_THRESHOLD    = 0.5    # silero confidence threshold
+  SAMPLING_RATE    = 16_000
+  MODEL_NAME       = "silero_vad"
+  MODEL_VERSION    = "v4"
+  ```
+
+- [ ] `extract_audio(clip_path: str, tmp_dir: Path) -> Path`: runs vendored ffmpeg
+      `-ac 1 -ar 16000 -f wav -vn -y`; raises `AudioExtractionError` on non-zero exit;
+      `try/finally` guarantees temp file cleanup even on exception
+- [ ] `run_vad(wav_path: Path) -> dict`: loads silero model (cached after first call),
+      returns `{speech_ratio: float, speech_segments: list[tuple], model_version: str}`
+- [ ] `classify_clip(speech_ratio: float) -> str`: returns one of `A-ROLL`, `B-ROLL`, `AMBIGUOUS`
+- [ ] `classify_all(clip_paths: list[str], sidecar_root: str) -> Iterator[dict]`: generator,
+      skips already-classified clips, yields one progress dict per clip (file, label, speech_ratio)
+- [ ] Idempotency: read sidecar, skip if `"classify" in stages_complete`
+- [ ] Sidecar update: merge `{classification, vad, stages_complete}` then call `sidecar.write_clip()`
+- [ ] No network calls. No Resolve calls. Pure local Python.
+
+#### Task 3: Extend `resolve_api.py` for classify writes
+
+- [ ] Add `VALID_CLIP_COLORS` set — the full list of SetClipColor valid values for Resolve
+      (Blue, Cyan, Green, Yellow, Red, Pink, Purple, Fuchsia, Rose, Lavender, Sky, Mint, Lemon, Sand, Cocoa, Cream, Orange — confirm against Resolve Python API reference via context7)
+- [ ] `set_clip_color(clip: Any, color: str) -> None`: validates against `VALID_CLIP_COLORS`;
+      raises `ValueError` with the full valid-values list if invalid; calls `clip.SetClipColor(color)`
+- [ ] `get_clip_by_path(media_pool: Any, file_path: str) -> Any | None`: look up a MediaPoolItem
+      by its `File Path` property, searching `A_CAM`, `B_CAM`, `C_CAM` bins
+- [ ] `classify_write_resolve(media_pool: Any, clip_path: str, label: str) -> bool`:
+      acquires lock, finds clip, writes Keywords = label, sets clip colour; returns False if clip not found (log warning, don't raise)
+- [ ] Add to `ingest_into_resolve` lock already present — no concurrent classify + ingest calls possible
+
+> NOTE: the clip-colour write described here **shipped** (inline in
+> `resolve_api.py` as `classify_write_resolve`, A-ROLL→Blue / B-ROLL→Green /
+> AMBIGUOUS→Yellow). Only the VAD/`speech_ratio` framing above is superseded.
+
+#### Task 4: Bridge extension for classify streaming
+
+- [ ] `bridge.py`: add `handle_classify` streaming handler
+  - Payload: `{path: str, dry_run?: bool}` — path is the organised shoot folder
+  - Per-clip: yields `{event: "clip_classified", file, label, speech_ratio}`
+  - On completion: yields `{event: "classify_complete", a_roll: N, b_roll: N, ambiguous: N}`
+- [ ] `python-bridge.ts`: add `classify` outbound type, `ClassifyProgress` + `ClassifyResult` inbound types
+- [ ] `main.js`: add `cairn:classify` IPC handler — spawns via `callPython`, streams progress to renderer, writes Resolve clips via `classify_write_resolve` (through a second IPC round-trip so Resolve writes stay in the main process)
+
+  **Note:** Resolve API calls happen inside `main.js` (JS WorkflowIntegration), not inside `bridge.py`. Architecture: Python classifies + writes sidecars → sends results → Node side calls `classify_write_resolve` for each clip. Serialise all Resolve writes through the existing `resolveApiQueue` if one exists, or guard with a mutex.
+
+- [ ] `preload.js`: expose `cairn.classify({path, onProgress})`
+- [ ] `types.ts`: add `ClassifyPayload`, `ClassifyProgressEvent`, `ClassifyResult`
+
+#### Task 5: Classify panel UI (`src/ui/ClassifyPanel.svelte`)
+
+- [ ] Trigger button: "Classify clips" (enabled only after ingest is done for a folder)
+- [ ] Progress bar + per-clip status line (clip name, label badge A/B/AMBIGUOUS, speech_ratio %)
+- [ ] Summary on completion: "12 A-roll / 34 B-roll / 3 Ambiguous"
+- [ ] **Ambiguous review sub-panel**: list of AMBIGUOUS clips with:
+  - Filename
+  - speech_ratio percentage
+  - Thumbnail (from ffmpeg frame at 50% — `assets/bin/ffmpeg -ss <mid> -i <clip> -frames:v 1 -q:v 5 -y /tmp/thumb-<id>.jpg`)
+  - Two buttons: "A-roll ▲" / "B-roll ▼"
+  - User confirmation: updates sidecar `{classification, user_confirmed: true}` + Resolve via `classify_write_resolve`
+- [ ] Add `<ClassifyPanel>` to `App.svelte` below the DropZone card; shown once `ingestResult` is non-null
+
+> NOTE: `ClassifyPanel.svelte` with the ambiguous-review sub-panel **shipped**.
+> Only the `speech_ratio` framing above is superseded by `face_ratio` /
+> `motion_score`.
+
+#### Task 6: pytest suite for classify (VAD version)
+
+- [ ] `tests/python/test_classify.py`:
+  - **Audio extraction**: mock ffmpeg, assert temp file path and cleanup
+  - **VAD sanity**: feed a 1-second sine wave (speech-like) → `speech_ratio > 0`; feed silence → `speech_ratio == 0.0`
+  - **Threshold logic**: parameterised tests for boundary values (0.04 → B-ROLL, 0.05 → B-ROLL, 0.06 → AMBIGUOUS, 0.60 → A-ROLL, 0.61 → A-ROLL)
+  - **Idempotency**: clip with `"classify" in stages_complete` is skipped (no ffmpeg call)
+  - **No-network assertion**: test harness blocks outbound with `pytest-httpserver` or socket mock; classify must pass
+  - **Sidecar merge**: assert `stages_complete` gains `"classify"` without losing `"ingest"`
+- [ ] All tests `tmp_path`-scoped
+
+#### Task 7: Sensors green + commit (VAD version)
+
+- [ ] `ruff check src/workers/classify.py` → 0 errors
+- [ ] `pyrefly check src/workers/classify.py` → 0 errors
+- [ ] `pytest tests/python/test_classify.py` → all green
+- [ ] `npm run typecheck && npm run lint && npm run test` → all green
+- [ ] Update `AGENT.md`: record silero VAD model cache location, ffmpeg path, any Resolve `SetClipColor` valid-values finding
+- [ ] Commit: `feat: Stage 2 classify — Silero VAD, clip colour, ambiguous review`
+- [ ] Tag: `v0.2.0`
+
+#### Session 3 Success Criteria (VAD version — superseded)
+
+1. Run classify on an organised shoot folder → every video clip gets A-ROLL/B-ROLL/AMBIGUOUS label
+2. Resolve media pool shows clip colours: Blue for A-roll, Green for B-roll, Yellow for ambiguous
+3. Ambiguous clips appear in the review panel with thumbnails; A/B buttons update Resolve + sidecar live
+4. Sidecar JSON updated with `vad` block and `"classify"` in `stages_complete`
+5. All sensors green
+
+---
+
+### DEFERRED · Session 4: Stage 3 — Transcribe (high-level)
+
+See archived `docs/archive/specs/transcribe.md` for full detail.
+
+#### Session 4 tasks (expand into sub-tasks at Session 4 start)
+
+- [ ] `src/workers/transcribe.py`: AssemblyAI SDK client, speaker labels, word-level JSON → sidecar shape
+- [ ] SRT writer: `utterances[]` → `04_EXPORT/.cairn/subtitles/<clip-id>.srt`
+- [ ] `resolve_api.py` extension: `attach_subtitle(clip, srt_path)` calling `clip.AddSubTitle`
+- [ ] `faster-whisper` fallback (gated on `cloud_transcription_allowed: false` in brief; NDA path)
+- [ ] Bridge handler `handle_transcribe`; IPC `cairn:transcribe`
+- [ ] `TranscribePanel.svelte`: per-clip progress, cost estimate before batch (AssemblyAI minutes), speaker labelling UI
+- [ ] Idempotency: skip if sidecar has matching `provider` + `provider_model`
+- [ ] Bill-safety test: two consecutive runs → exactly one API call (mock AssemblyAI client)
+- [ ] Commit: `feat: Stage 3 transcribe — AssemblyAI + Whisper fallback, subtitle track`; tag `v0.3.0`
+
+#### Pre-Session 4 decision needed
+
+- Confirm `clip.AddSubTitle(path)` is the correct Python API call for attaching an SRT as a subtitle track — verify via DaVinci Resolve scripting docs before the session starts.
+
+---
+
+### DEFERRED · Session 5: Stage 4 — Vision (high-level)
+
+See archived `docs/archive/specs/vision.md` for full detail.
+
+#### Session 5 tasks
+
+- [ ] `src/workers/vision.py`: ffmpeg 5-frame extraction, Claude vision API call via `tag_broll` tool, tag validation, frame cleanup
+- [ ] Prompt: `src/orchestrator/prompts/vision_tag.md` (meta-reasoning block mandatory)
+- [ ] `resolve_api.py` extension: `set_keywords(clip, keywords_str)` — write to `Keywords` field via `SetMetadata`
+- [ ] Bridge handler + IPC + UI panel with cost estimate (tokens × clips)
+- [ ] LLM-as-judge loop-back: 10% sample re-scored, low-confidence tags surfaced in UI
+- [ ] Local vision fallback (NDA path) — if significant lift, defer to `fix_plan.md` and ship cloud-only
+- [ ] Commit: `feat: Stage 4 vision — 5-frame extraction, Claude tagging, Resolve keywords`; tag `v0.4.0`
+
+#### Pre-Session 5 decisions
+
+- Tool use (`tag_broll`) vs JSON-in-text: default to tool use.
+- Frame count scaling for long clips: start at 5 flat; revisit after sample shoot.
+
+---
+
+### DEFERRED · Session 6: Stage 5 — Project Brief (high-level)
+
+See archived `docs/archive/specs/brief.md` for full detail.
+
+#### Session 6 tasks
+
+- [ ] `src/orchestrator/prompts/brief_system.md` and `brief_finalise.md`
+- [ ] `BriefPanel.svelte`: conversational chat UI (message list, input box), live JSON progress ("4/9 fields"), Edit / Start Over modes
+- [ ] Node orchestration: `cairn:brief:message` IPC → Claude `messages.create` with `update_brief_draft` + `finalise_brief` tools → returns updated draft JSON
+- [ ] Write `brief.json` to `04_EXPORT/.cairn/brief.json`
+- [ ] LLM-as-judge on finalisation: second call scores accuracy of extraction
+- [ ] Gate Stages 6–7 on `brief.json` with `finalised: true`
+- [ ] Commit: `feat: Stage 5 brief — conversational brief panel`; tag `v0.5.0`
+
+#### Architecture note
+
+Brief can be filled **in parallel** with Stages 1–4 (the brief chat doesn't depend on transcripts or vision tags being complete). Open the brief panel once ingest is done; only Stages 6–7 are gated on both indexing + brief being complete.
+
+---
+
+### DEFERRED · Session 7: Stage 6 — Soundbites (high-level)
+
+See archived `docs/archive/specs/soundbites.md` for full detail.
+
+#### Session 7 tasks
+
+- [ ] `src/orchestrator/prompts/soundbite_select.md` (meta-reasoning block + beat-type defs)
+- [ ] `src/orchestrator/prompts/soundbite_judge.md`
+- [ ] Node orchestration: for each A-roll clip, read transcript + brief → Claude `propose_soundbites` tool → judge pass → write markers
+- [ ] `resolve_api.py` extension: `add_clip_marker(clip, frame, color, name, note, duration, custom_data)` and `clear_cairn_markers(clip)` (by customData prefix)
+- [ ] Frame conversion: `sec → frame` using clip FPS from `GetClipProperty("FPS")`
+- [ ] Sidecar: soundbites array written before Resolve marker calls
+- [ ] Beat-type → colour mapping validated at call time
+- [ ] `SoundbitesPanel.svelte`: progress + review panel for `judge_score < 0.6` flagged bites
+- [ ] Commit: `feat: Stage 6 soundbites — selection, judge pass, Resolve markers`; tag `v0.6.0`
+
+#### Pre-Session 7 verification needed
+
+- Confirm `MediaPoolItem.AddMarker(frameId, color, name, note, duration, customData)` signature in Python API — check via context7 before coding. If customData not supported, find the correct overload.
+
+---
+
+### DEFERRED · Session 8: Stage 7 — B-roll Matching (high-level)
+
+See archived `docs/archive/specs/matching.md` for full detail.
+
+#### Session 8 tasks
+
+- [ ] `src/orchestrator/prompts/match_broll.md` (meta-reasoning block, literal/thematic defs)
+- [ ] `src/orchestrator/prompts/match_judge.md`
+- [ ] Build B-roll library summary: one line per clip from vision sidecar tags
+- [ ] For each soundbite: Claude `propose_matches` tool → judge pass → drop `judge_score < 0.6`
+- [ ] `resolve_api.py` extension: `set_shot_field(clip, value)` + `set_description_field(clip, value)` — confirm Resolve field names (`Shot`, `Description`) via Python API reference
+- [ ] A-roll marker note append: `MATCHES:` line, preserving existing marker content
+- [ ] Sidecars: B-roll + A-roll updated before any Resolve write
+- [ ] `MatchingPanel.svelte`: per-soundbite coverage, zero-match bites flagged, rejected-match log
+- [ ] Commit: `feat: Stage 7 matching — literal/thematic B-roll to soundbite pairing`; tag `v0.7.0`
+
+#### Resolve API risk to resolve early
+
+- `MediaPoolItem.SetMetadata("Shot", …)` — confirm `Shot` is a writable field in the scripting API. If not, use a custom metadata key and document the fallback in `AGENT.md`.
+
+---
+
+### DEFERRED · Session 9: Stage 8 — Sidebar Cockpit (high-level)
+
+See archived `docs/archive/specs/sidebar.md` for full detail.
+
+#### Session 9 tasks
+
+- [ ] `SidebarPanel.svelte`: story map component showing all soundbites (by beat colour), B-roll match badges, click-to-jump
+- [ ] Click-to-jump → `cairn.resolve.jumpToClip(clip_id, frame)` IPC → `GetCurrentTimeline().SetCurrentVideoClipIndex()` or equivalent
+- [ ] B-roll preview panel: hover/click shows matched clips with their tags and thumbnail
+- [ ] Project state indicator: which stages complete for current project, what's pending
+- [ ] Commit: `feat: Stage 8 sidebar — story map cockpit UI`; tag `v0.8.0`
+
+---
+
+### DEFERRED · Session 10: Packaging + Code Signing (high-level)
+
+> Largely complete already — see "Carry-Forward / Backlog" above for the live
+> packaging status. Retained here as the original plan.
+
+#### Session 10 tasks
+
+- [x] Mac: `packaging/build-mac.sh` — codesign + drag-install DMG + notarize; requires Apple Developer ID cert + notarytool credentials
+- [x] Windows: `electron-builder` NSIS installer via `packaging/electron-builder.json5`; custom `installer.nsh` sets install dir to Resolve plugin folder; standard code signing cert
+- [x] PyInstaller bundle: `packaging/workers.spec` → single `workers` binary; `getWorkersPath()` in `main.js` checks `resources/workers[.exe]` (prod) → `packaging/dist/workers[.exe]` (dev) → Python script fallback
+- [x] Entitlements: `packaging/entitlements.mac.plist` with hardened runtime flags for Python/ONNX Runtime
+- [x] Version bumped to `1.0.0-rc1` in `package.json` + `manifest.xml`
+- [ ] Smoke-test: install on a clean macOS machine (no Python, no Node) — plugin must load and full pipeline must run (requires Apple Developer cert to notarize — deferred until cert obtained)
+- [x] Commit: `chore: packaging + installers — PyInstaller bundle, Mac DMG, Windows NSIS, v1.0.0-rc1`; tag `v1.0.0-rc1`
