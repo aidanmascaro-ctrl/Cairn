@@ -62,3 +62,6 @@ htmlcov/
 
 # Blackmagic native addon — populated by packaging/install-dev-plugin.sh
 src/orchestrator/WorkflowIntegration.node
+
+# graphify knowledge graph (regenerated — do not commit)
+graphify-out/

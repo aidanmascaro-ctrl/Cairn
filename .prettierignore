@@ -1,0 +1,5 @@
+graphify-out/
+.claude/
+dist/
+node_modules/
+packaging/dist/
