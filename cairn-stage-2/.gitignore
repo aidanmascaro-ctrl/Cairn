@@ -1,0 +1,4 @@
+# Harness-local sidecar/transcript cache — never commit transcripts or extracted frames
+.cache/
+*.wav
+frames/
