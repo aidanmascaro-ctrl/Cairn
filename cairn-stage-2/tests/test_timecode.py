@@ -4,7 +4,7 @@ from helpers import timecode as tc
 
 def test_seconds_to_frames_rounds_to_nearest():
     assert tc.seconds_to_frames(2.0, 25) == 50
-    assert tc.seconds_to_frames(2.02, 25) == 51  # 50.5 -> 51 (round half up via round())
+    assert tc.seconds_to_frames(2.02, 25) == 51  # 50.5 -> 51 (round half up via int(x + 0.5))
     assert tc.seconds_to_frames(0.0, 25) == 0
 
 

@@ -36,7 +36,7 @@ def write(root, clip_id: str, record: dict) -> None:
 
 def source_signature(file_path) -> str:
     st = os.stat(file_path)
-    return f"{int(st.st_mtime)}:{st.st_size}"
+    return f"{st.st_mtime}:{st.st_size}"
 
 
 def is_fresh(record, file_path) -> bool:
