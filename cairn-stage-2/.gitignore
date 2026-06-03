@@ -2,3 +2,7 @@
 .cache/
 *.wav
 frames/
+
+# Test artifacts
+.coverage
+.pytest_cache/
