@@ -186,9 +186,55 @@ Build a **new** timeline; never touch the source timeline (Safety Invariant 2).
 2. Optional draft export via the MCP render pipeline: `render.add_job(preset, target_dir)` then
    `render.start()`. The render writes to the operator's chosen output dir — never over source media.
 
+## v1b CONFIRMED — frame-accurate B-roll on V2 via FCPXML import (2026-06-03)
+
+The Task-1 limitation (append can't target V2/record-frame) is fully bypassed by generating a
+multi-track FCPXML and importing it. **This now works and is the preferred assembly path when the
+deliverable needs real B-roll overlays, not just markers.**
+
+- **Generator:** `build_fcpxml.py` — A-roll = primary-storyline `<asset-clip>` (video +
+  `audioRole="dialogue"`); B-roll = video-only `<video>` elements with `lane="1"` (→ V2), nested in
+  the A-roll clip that contains each one's record frame. Connected-clip offset is in the **parent
+  clip's source timebase**: `offset = parent.src_start + (broll_tl_pos − parent.tl_offset)`. Using
+  `<video>` (not `<asset-clip>`) for B-roll keeps it video-only — no drone/ambient audio under the
+  dialogue.
+- **THE UNLOCK:** `media_pool.import_timeline(path, options={"importSourceClips": false})`. Without
+  `importSourceClips:false` the import **fails with a bare "Failed to import timeline"** — Resolve
+  tries to re-import the media-rep source clips and chokes. With it false, Resolve relinks to clips
+  already in the media pool (matched by `media-rep src` path) and the import succeeds. This was the
+  entire blocker; the FCPXML dialect itself was fine.
+- **FCPXML dialect that imports cleanly into Resolve 21:** `version="1.9"`, `<!DOCTYPE fcpxml>`,
+  `<format>` with `frameDuration`/`width`/`height` (a non-standard `name=` is best omitted),
+  `<library><event><project><sequence><spine>`, rational times as `<frames>/25s`, portrait
+  `width="2160" height="3840"`. `timeline.export` (FCPXML/DRT/EDL) returned `success:false` for every
+  type tried — **import works, export does not** on this MCP.
+- **Result:** one import yields V1 (A-roll spine) + A1 (synced dialogue) + V2 (8 B-roll overlays),
+  all frame-accurate. Markers (v1a) remain the fallback when you'd rather hand-place B-roll.
+
 ### Reversibility
 
 The entire assembly is one new timeline. Deleting it
 (`media_pool.delete_timelines([new_timeline_id])`) fully undoes the run. Source clips, the source
 timeline, and the sidecar cache are untouched.
+
+## v2 SOLVED — native V2 placement via patched MCP (2026-06-03)
+
+The whole FCPXML detour above was only necessary because the connected MCP
+(**samuelgursky/davinci-resolve-mcp v2.1.0**, at `~/Documents/davinci-resolve-mcp/`) wrapped the
+**simple** `AppendToTimeline(clips)` — V1-only, no track/frame targeting — and its `add_track`
+passed an empty `sub_type` that Resolve rejects (so V2 couldn't even be created). Both are now
+**patched** (see that repo's `PATCH_NOTES.md`):
+
+- `media_pool.append_to_timeline` now accepts `clip_infos: [{clip_id, startFrame, endFrame,
+  mediaType (1=video/2=audio), trackIndex, recordFrame}]` → **frame-accurate B-roll on V2**, audio
+  kept off the overlay via `mediaType:1`.
+- `timeline.add_track(video)` now works (omits the empty sub_type).
+
+**New assembly path (preferred over FCPXML):** build the A-roll spine on V1 with the simple
+append (as before), `add_track(video)` to make V2, then for each matched B-roll
+`append_to_timeline(clip_infos=[{clip_id, startFrame, endFrame, mediaType:1, trackIndex:2,
+recordFrame:<beat>}])`. No FCPXML, no offline-relink pain, all online. Patches load on MCP/session
+restart. The diagnostic chain that found this: the rich `AppendToTimeline(clipInfo{trackIndex,
+recordFrame})` exists in Resolve's API; it was the **MCP wrapper** that didn't expose it — a thin
+wrapper limit, not a Resolve limit.
 
