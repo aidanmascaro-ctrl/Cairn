@@ -1,3 +1,6 @@
+import os
+
+import pytest
 from helpers import cache
 
 
@@ -21,6 +24,24 @@ def test_write_merges_not_overwrites(tmp_path):
 
 def test_read_missing_returns_none(tmp_path):
     assert cache.read(tmp_path, "nope") is None
+
+
+def test_write_leaves_no_tmp_file_when_replace_fails(tmp_path, monkeypatch):
+    # If os.replace raises mid-write, the partial .tmp must be cleaned up and the
+    # existing record left intact — never accumulate stale temp files.
+    cache.write(tmp_path, "abc", {"label": "A-ROLL"})
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cache.os, "replace", boom)
+    with pytest.raises(OSError):
+        cache.write(tmp_path, "abc", {"words": [1, 2]})
+
+    leftover = [n for n in os.listdir(tmp_path) if n.endswith(".tmp")]
+    assert leftover == []
+    # Prior record survived untouched.
+    assert cache.read(tmp_path, "abc") == {"label": "A-ROLL"}
 
 
 def test_freshness_tracks_source_signature(tmp_path):

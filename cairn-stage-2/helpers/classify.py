@@ -8,20 +8,34 @@ import subprocess
 AROLL_THRESHOLD = 0.45  # speech_ratio >= this -> A-ROLL
 BROLL_THRESHOLD = 0.10  # speech_ratio <= this -> B-ROLL
 
-_START = re.compile(r"silence_start:\s*([0-9.]+)")
-_END = re.compile(r"silence_end:\s*([0-9.]+)")
+_EVENT = re.compile(r"silence_(start|end):\s*([0-9.]+)")
 
 
 def parse_silence_ratio(stderr: str, duration: float) -> float:
-    """speech_ratio = 1 - silent_time/duration, parsed from silencedetect stderr."""
+    """speech_ratio = 1 - silent_time/duration, parsed from silencedetect stderr.
+
+    Walks the start/end events in chronological order (a state machine) rather than
+    pairing two separate lists positionally. This correctly handles the two cases
+    ffmpeg's silencedetect leaves implicit:
+      - a clip that opens in silence: only a `silence_end` is emitted (no start at 0),
+      - a clip that ends in silence: a `silence_start` with no closing `silence_end`.
+    Both biased B-roll toward A-ROLL under the old positional pairing.
+    """
     if duration <= 0:
         raise ValueError("duration must be > 0")
-    starts = [float(x) for x in _START.findall(stderr)]
-    ends = [float(x) for x in _END.findall(stderr)]
     silent = 0.0
-    for i, s in enumerate(starts):
-        e = ends[i] if i < len(ends) else duration
-        silent += max(0.0, min(e, duration) - s)
+    open_at: float | None = None
+    for kind, pos in ((m.group(1), float(m.group(2))) for m in _EVENT.finditer(stderr)):
+        if kind == "start":
+            if open_at is None:  # ignore a redundant second start
+                open_at = pos
+            continue
+        # end event: an end with no preceding start means the clip opened silent (t=0).
+        start = open_at if open_at is not None else 0.0
+        silent += max(0.0, min(pos, duration) - start)
+        open_at = None
+    if open_at is not None:  # trailing silence ran to the end of the clip
+        silent += max(0.0, duration - open_at)
     return max(0.0, min(1.0, 1.0 - silent / duration))
 
 
@@ -49,7 +63,16 @@ def probe_duration(file_path, ffprobe: str = "ffprobe") -> float:
         text=True,
         check=True,
     )
-    return float(out.stdout.strip())
+    raw = out.stdout.strip()
+    try:
+        duration = float(raw)
+    except ValueError as exc:
+        # Containers without a duration tag (raw MXF, fragmented MP4) print "N/A".
+        # Fail loud rather than let a NaN/None duration flow into the speech-ratio math.
+        raise ValueError(f"ffprobe returned no usable duration: {raw!r}") from exc
+    if duration <= 0:
+        raise ValueError(f"clip duration must be > 0, got {duration}")
+    return duration
 
 
 def run_silencedetect(

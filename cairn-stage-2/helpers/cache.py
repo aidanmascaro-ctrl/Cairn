@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -29,9 +30,16 @@ def write(root, clip_id: str, record: dict) -> None:
     root.mkdir(parents=True, exist_ok=True)
     merged = {**(read(root, clip_id) or {}), **record}
     fd, tmp = tempfile.mkstemp(dir=root, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(merged, fh, indent=2, ensure_ascii=False)
-    os.replace(tmp, cache_file(root, clip_id))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp, cache_file(root, clip_id))
+    except BaseException:
+        # Never leave a partial .tmp behind if write/replace fails (disk full,
+        # permissions, interrupt). The previous cache file stays intact.
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
 
 
 def source_signature(file_path) -> str:
