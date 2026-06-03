@@ -31,3 +31,12 @@ def test_invalid_inputs_raise():
         tc.timecode_to_frames("00:00:25", 25)  # wrong field count
     with pytest.raises(ValueError):
         tc.timecode_to_frames("00:00:00:25", 25)  # frame out of range
+
+
+@pytest.mark.parametrize("fps", [29.97, 23.976, 59.94])
+def test_drop_frame_fps_rejected(fps):
+    # v1 supports non-drop-frame integer fps only; fractional rates must fail loud.
+    with pytest.raises(ValueError):
+        tc.timecode_to_frames("00:00:01:00", fps)
+    with pytest.raises(ValueError):
+        tc.frames_to_timecode(30, fps)

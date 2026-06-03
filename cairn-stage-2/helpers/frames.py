@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -18,7 +19,12 @@ def frame_timestamps(duration: float, count: int = 5) -> list[float]:
     return [round(inset + span * i / (count - 1), 3) for i in range(count)]
 
 
-def extract_frames(file_path, timestamps, out_dir, ffmpeg: str = "ffmpeg") -> list[Path]:
+def extract_frames(
+    file_path: str | Path,
+    timestamps: Iterable[float],
+    out_dir: str | Path,
+    ffmpeg: str = "ffmpeg",
+) -> list[Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 
 AROLL_THRESHOLD = 0.45  # speech_ratio >= this -> A-ROLL
 BROLL_THRESHOLD = 0.10  # speech_ratio <= this -> B-ROLL
@@ -47,7 +48,7 @@ def classify(speech_ratio: float) -> str:
     return "AMBIGUOUS"
 
 
-def probe_duration(file_path, ffprobe: str = "ffprobe") -> float:
+def probe_duration(file_path: str | Path, ffprobe: str = "ffprobe") -> float:
     out = subprocess.run(
         [
             ffprobe,
@@ -76,7 +77,10 @@ def probe_duration(file_path, ffprobe: str = "ffprobe") -> float:
 
 
 def run_silencedetect(
-    file_path, ffmpeg: str = "ffmpeg", noise: str = "-30dB", min_silence: float = 0.5
+    file_path: str | Path,
+    ffmpeg: str = "ffmpeg",
+    noise: str = "-30dB",
+    min_silence: float = 0.5,
 ) -> str:
     proc = subprocess.run(
         [
@@ -96,7 +100,7 @@ def run_silencedetect(
     return proc.stderr
 
 
-def analyze_clip(file_path) -> dict:
+def analyze_clip(file_path: str | Path) -> dict:
     """Side-effectful convenience: probe + silencedetect + classify."""
     duration = probe_duration(file_path)
     ratio = parse_silence_ratio(run_silencedetect(file_path), duration)

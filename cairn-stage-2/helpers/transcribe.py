@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 
@@ -21,12 +22,14 @@ def segments_to_record(segments: Iterable[Any], info: Any) -> dict:
     }
 
 
-def transcribe_file(file_path, model, **kw) -> dict:
+def transcribe_file(file_path: str | Path, model: Any, **kw: Any) -> dict:
+    # `model` is a faster-whisper WhisperModel (duck-typed: anything with a
+    # `.transcribe(path, word_timestamps=...) -> (segments, info)` method).
     segments, info = model.transcribe(str(file_path), word_timestamps=True, **kw)
     return segments_to_record(segments, info)
 
 
-def load_model(size: str = "base", device: str = "auto", compute_type: str = "int8"):
+def load_model(size: str = "base", device: str = "auto", compute_type: str = "int8") -> Any:
     from faster_whisper import WhisperModel  # imported lazily so unit tests need no model
 
     return WhisperModel(size, device=device, compute_type=compute_type)
