@@ -27,3 +27,8 @@ def test_assembly_plan_emits_set_mark_then_append_in_order():
     assert plan[0]["set_mark"]["mark_in"] == 25
     assert plan[0]["set_mark"]["mark_out"] == 49
     assert plan[0]["append"]["clip_id"] == "a"
+
+
+def test_soundbite_shorter_than_one_frame_raises():
+    with pytest.raises(ValueError):
+        assemble.soundbite_to_mark(assemble.Soundbite("x", 2.0, 2.01, 25))

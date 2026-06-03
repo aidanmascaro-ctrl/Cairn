@@ -68,6 +68,7 @@ def run_silencedetect(
         ],
         capture_output=True,
         text=True,
+        check=True,
     )
     return proc.stderr
 

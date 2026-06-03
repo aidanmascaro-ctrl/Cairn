@@ -41,3 +41,23 @@ def test_classify_thresholds(ratio, label):
 def test_parse_rejects_bad_duration():
     with pytest.raises(ValueError):
         classify.parse_silence_ratio("", 0.0)
+
+
+def test_run_silencedetect_raises_on_ffmpeg_error(monkeypatch):
+    import subprocess
+
+    # Simulate ffmpeg exiting with returncode=1 without raising — check=True must raise.
+    class FakeResult:
+        returncode = 1
+        stderr = ""
+        stdout = ""
+
+    def fake_run(*args, **kwargs):
+        result = FakeResult()
+        if kwargs.get("check"):
+            raise subprocess.CalledProcessError(result.returncode, args[0][0])
+        return result
+
+    monkeypatch.setattr(classify.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError):
+        classify.run_silencedetect("/fake/clip.mp4")
