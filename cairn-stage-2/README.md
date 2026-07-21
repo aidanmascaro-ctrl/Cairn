@@ -27,4 +27,9 @@ project phase, not the product's internal pipeline stages (Ingest / Classify / C
 
 ## Status
 
-Design approved (2026-06-02). Next: implementation plan (runbook + thin helpers). No code yet.
+Harness built and live (helpers, tests, runbook). Frame-accurate B-roll on V2 **solved** two
+ways — FCPXML import (`build_fcpxml.py`, v1b) and native placement via the patched
+davinci-resolve-mcp (v2, preferred). **Not yet done:** the v2 native path is documented but not
+wired into harness code, and not re-verified live since the MCP patch.
+
+See [`docs/HANDOFF.md`](docs/HANDOFF.md) to resume, then [`docs/runbook.md`](docs/runbook.md).
