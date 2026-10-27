@@ -114,7 +114,7 @@
 <style>
   .inspector {
     margin-top: 0.6rem;
-    border-top: 1px solid #2a2a2c;
+    border-top: 1px solid var(--hairline);
     padding-top: 0.6rem;
   }
   .state-row {
@@ -122,7 +122,7 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.8rem;
-    color: #7f7f82;
+    color: var(--text-tertiary);
     padding: 0.25rem 0;
   }
   .error-row {
@@ -162,8 +162,8 @@
     height: 68px;
     border-radius: 3px;
     overflow: hidden;
-    border: 1px solid #2a2a2c;
-    background: #131315;
+    border: 1px solid var(--hairline);
+    background: var(--inset);
   }
   .frame-img {
     width: 100%;
@@ -188,7 +188,7 @@
   .ts {
     font-size: 0.68rem;
     font-family: "SF Mono", ui-monospace, monospace;
-    color: #7f7f82;
+    color: var(--text-tertiary);
   }
   .motion-dot {
     width: 7px;
@@ -212,13 +212,13 @@
   .sig-label {
     width: 44px;
     font-size: 0.72rem;
-    color: #7f7f82;
+    color: var(--text-tertiary);
     flex-shrink: 0;
   }
   .sig-track {
     flex: 1;
     height: 5px;
-    background: #2a2a2c;
+    background: var(--hairline);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -237,7 +237,7 @@
     width: 34px;
     font-size: 0.7rem;
     font-family: "SF Mono", ui-monospace, monospace;
-    color: #b9b9b9;
+    color: var(--text-secondary);
     text-align: right;
     flex-shrink: 0;
   }
@@ -250,7 +250,7 @@
     font-size: 0.75rem;
   }
   .knn-prefix {
-    color: #7f7f82;
+    color: var(--text-tertiary);
   }
   .knn-badge {
     font-weight: 700;
@@ -272,6 +272,6 @@
     background: rgba(240, 190, 70, 0.18);
   }
   .knn-conf {
-    color: #7f7f82;
+    color: var(--text-tertiary);
   }
 </style>

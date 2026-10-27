@@ -89,6 +89,8 @@
   }
 </script>
 
+<div class="titlebar" aria-hidden="true"></div>
+
 <main>
   <header>
     <h1>Cairn</h1>
@@ -197,39 +199,49 @@
 </main>
 
 <style>
+  /* Empty band under the floating traffic lights: drags the window, double-click zooms (macOS only). */
+  .titlebar {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: var(--top-inset);
+    background: var(--page);
+    -webkit-app-region: drag;
+    z-index: 100;
+  }
   main {
     max-width: 720px;
     margin: 0 auto;
-    padding: 2.5rem 1.5rem;
+    padding: calc(var(--top-inset) + 1.25rem) 1.5rem 2.5rem;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    color: #e6e6e6;
+    color: var(--text);
   }
   header {
     margin-bottom: 2rem;
   }
   header h1 {
-    font-size: 2.25rem;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 400;
     margin: 0;
-    letter-spacing: -0.02em;
   }
   header .tagline {
-    color: #9a9a9a;
-    margin-top: 0.25rem;
-    font-style: italic;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    margin: 0.4rem 0 0 0;
   }
   .card {
-    background: #1f1f21;
-    border: 1px solid #2a2a2c;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 1.25rem;
   }
   .card h2 {
     margin: 0 0 0.75rem 0;
-    font-size: 1.05rem;
-    color: #b9b9b9;
+    font-size: 11px;
+    color: var(--text-tertiary);
     font-weight: 600;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   dl {
@@ -239,7 +251,7 @@
     margin: 0;
   }
   dt {
-    color: #7f7f82;
+    color: var(--text-tertiary);
     font-size: 0.9rem;
   }
   dd {
@@ -253,16 +265,16 @@
   }
   button {
     margin-top: 1rem;
-    background: #3a3a3d;
+    background: var(--control);
     color: inherit;
-    border: 1px solid #4a4a4d;
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
     cursor: pointer;
   }
   button:hover {
-    background: #46464a;
+    background: var(--control-hover);
   }
   .error {
     color: #f28b82;
@@ -313,7 +325,7 @@
   }
   .banner-trace {
     flex-basis: 100%;
-    background: #131315;
+    background: var(--inset);
     color: #a0a0a3;
     border-radius: 4px;
     padding: 0.5rem 0.6rem;
@@ -342,12 +354,12 @@
   }
   .diagnostics > summary {
     cursor: pointer;
-    color: #7f7f82;
+    color: var(--text-tertiary);
     font-size: 0.82rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     padding: 0.4rem 0;
-    border-top: 1px solid #2a2a2c;
+    border-top: 1px solid var(--hairline);
     user-select: none;
     list-style: none;
   }
@@ -363,7 +375,7 @@
     content: "▾ ";
   }
   .diagnostics > summary:hover {
-    color: #b9b9b9;
+    color: var(--text-secondary);
   }
   .diagnostics[open] {
     padding-bottom: 1rem;

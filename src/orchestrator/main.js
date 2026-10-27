@@ -889,13 +889,26 @@ function registerIpc() {
   });
 }
 
+// One flat page colour from the title bar down (Lyra's look). Must match --page in src/ui/app.css,
+// so the window never flashes a different colour before the renderer paints.
+const PAGE_COLOUR = "#292929";
+
+/** macOS: hide the title bar and let the page run under the floating traffic lights. */
+function seamlessChrome() {
+  if (process.platform !== "darwin") return {};
+  return { titleBarStyle: "hidden", backgroundColor: PAGE_COLOUR };
+}
+
 function createMainWindow() {
   const win = new BrowserWindow({
     width: 1040,
     height: 720,
+    minWidth: 560,
+    minHeight: 480,
     useContentSize: true,
     autoHideMenuBar: true,
     title: "Cairn",
+    ...seamlessChrome(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

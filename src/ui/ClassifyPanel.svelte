@@ -368,23 +368,23 @@
 
 <style>
   .card {
-    background: #1f1f21;
-    border: 1px solid #2a2a2c;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 1.25rem;
   }
   .card h2 {
     margin: 0 0 0.75rem 0;
-    font-size: 1.05rem;
-    color: #b9b9b9;
+    font-size: 11px;
+    color: var(--text-tertiary);
     font-weight: 600;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .hint {
     font-size: 0.88rem;
-    color: #7f7f82;
+    color: var(--text-tertiary);
     margin: 0 0 0.9rem 0;
     line-height: 1.5;
   }
@@ -417,7 +417,7 @@
   }
   .progress-bar-wrap {
     height: 6px;
-    background: #2a2a2c;
+    background: var(--hairline);
     border-radius: 3px;
     overflow: hidden;
     margin-bottom: 0.75rem;
@@ -429,8 +429,8 @@
     transition: width 0.2s ease;
   }
   .progress-log {
-    background: #131315;
-    border: 1px solid #2a2a2c;
+    background: var(--inset);
+    border: 1px solid var(--hairline);
     border-radius: 6px;
     padding: 0.6rem 0.75rem;
     max-height: 180px;
@@ -473,8 +473,8 @@
   }
   .chip.skipped {
     background: rgba(160, 160, 160, 0.1);
-    color: #7f7f82;
-    border: 1px solid #3a3a3d;
+    color: var(--text-tertiary);
+    border: 1px solid var(--control);
   }
   .chip.chip-error {
     background: rgba(242, 139, 130, 0.12);
@@ -495,19 +495,19 @@
   }
   .details-btn {
     background: transparent;
-    color: #7f7f82;
-    border: 1px solid #3a3a3d;
+    color: var(--text-tertiary);
+    border: 1px solid var(--control);
     border-radius: 4px;
     padding: 0.15rem 0.5rem;
     font-size: 0.75rem;
     cursor: pointer;
   }
   .details-btn:hover {
-    color: #b9b9b9;
-    background: #2a2a2c;
+    color: var(--text-secondary);
+    background: var(--hairline);
   }
   .error-detail {
-    background: #131315;
+    background: var(--inset);
     border: 1px solid rgba(242, 139, 130, 0.2);
     border-radius: 6px;
     padding: 0.5rem 0.75rem;
@@ -531,12 +531,12 @@
     white-space: nowrap;
   }
   .err-reason {
-    color: #7f7f82;
+    color: var(--text-tertiary);
   }
   .review-header h3 {
     margin: 0 0 0.75rem 0;
     font-size: 0.92rem;
-    color: #b9b9b9;
+    color: var(--text-secondary);
     font-weight: 500;
   }
   .review-list {
@@ -550,7 +550,7 @@
     gap: 0.75rem;
     align-items: flex-start;
     background: #181819;
-    border: 1px solid #2a2a2c;
+    border: 1px solid var(--hairline);
     border-radius: 8px;
     padding: 0.6rem 0.75rem;
     transition: border-color 0.15s;
@@ -562,7 +562,7 @@
     height: 48px;
     border-radius: 4px;
     overflow: hidden;
-    background: #2a2a2c;
+    background: var(--hairline);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -573,7 +573,7 @@
     object-fit: cover;
   }
   .thumb-placeholder {
-    color: #4a4a4d;
+    color: var(--control-border);
     font-size: 1.2rem;
   }
   .clip-info {
@@ -592,7 +592,7 @@
   .clip-meta {
     margin: 0 0 0.4rem 0;
     font-size: 0.8rem;
-    color: #7f7f82;
+    color: var(--text-tertiary);
   }
 
   .btn-aroll,
@@ -635,9 +635,9 @@
   }
   .reset-btn,
   button {
-    background: #3a3a3d;
+    background: var(--control);
     color: inherit;
-    border: 1px solid #4a4a4d;
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
@@ -645,7 +645,7 @@
   }
   .reset-btn:hover,
   button:hover:not(:disabled) {
-    background: #46464a;
+    background: var(--control-hover);
   }
   button:disabled {
     opacity: 0.4;
@@ -665,16 +665,16 @@
   }
   .change-folder-btn {
     background: transparent;
-    color: #7f7f82;
-    border: 1px solid #3a3a3d;
+    color: var(--text-tertiary);
+    border: 1px solid var(--control);
     border-radius: 6px;
     padding: 0.4rem 0.75rem;
     font-size: 0.82rem;
     cursor: pointer;
   }
   .change-folder-btn:hover:not(:disabled) {
-    background: #2a2a2c;
-    color: #b9b9b9;
+    background: var(--hairline);
+    color: var(--text-secondary);
   }
   .thumb-loading {
     color: #5a8cff;

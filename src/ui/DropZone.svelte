@@ -188,22 +188,22 @@
 
 <style>
   .card {
-    background: #1f1f21;
-    border: 1px solid #2a2a2c;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 1.25rem;
   }
   .card h2 {
     margin: 0 0 1rem 0;
-    font-size: 1.05rem;
-    color: #b9b9b9;
+    font-size: 11px;
+    color: var(--text-tertiary);
     font-weight: 600;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .drop-zone {
-    border: 2px dashed #3a3a3d;
+    border: 2px dashed var(--control);
     border-radius: 8px;
     padding: 2rem 1.5rem;
     text-align: center;
@@ -259,7 +259,7 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.88rem;
-    color: #7f7f82;
+    color: var(--text-tertiary);
     cursor: pointer;
     user-select: none;
   }
@@ -293,8 +293,8 @@
   }
   .progress-log {
     margin-top: 0.75rem;
-    background: #131315;
-    border: 1px solid #2a2a2c;
+    background: var(--inset);
+    border: 1px solid var(--hairline);
     border-radius: 6px;
     padding: 0.6rem 0.75rem;
     max-height: 200px;
@@ -323,7 +323,7 @@
     margin: 0 0 0.75rem 0;
   }
   dt {
-    color: #7f7f82;
+    color: var(--text-tertiary);
     font-size: 0.85rem;
   }
   dd {
@@ -350,16 +350,16 @@
     word-break: break-all;
   }
   button {
-    background: #3a3a3d;
+    background: var(--control);
     color: inherit;
-    border: 1px solid #4a4a4d;
+    border: 1px solid var(--control-border);
     border-radius: 6px;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
     cursor: pointer;
   }
   button:hover:not(:disabled) {
-    background: #46464a;
+    background: var(--control-hover);
   }
   button:disabled {
     opacity: 0.4;

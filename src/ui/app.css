@@ -1,11 +1,33 @@
+/* Lyra's look: one flat page colour from the title bar down, quiet translucent surfaces on top. */
+:root {
+  color-scheme: dark;
+  --page: #292929;
+  --surface: rgba(255, 255, 255, 0.045);
+  --hairline: rgba(255, 255, 255, 0.07);
+  --inset: rgba(0, 0, 0, 0.2);
+  --control: rgba(255, 255, 255, 0.08);
+  --control-hover: rgba(255, 255, 255, 0.13);
+  --control-border: rgba(255, 255, 255, 0.1);
+  --text: #e6e6e6;
+  --text-secondary: #b9b9b9;
+  --text-tertiary: #8a8a8a;
+  --serif: "New York", ui-serif, Georgia, serif;
+  /* Room for the floating traffic lights above the first line (macOS only, set in main.ts). */
+  --top-inset: 0px;
+}
+
+html.mac {
+  --top-inset: 44px;
+}
+
 html,
 body,
 #app {
   height: 100%;
   margin: 0;
   padding: 0;
-  background: #141416;
-  color: #e6e6e6;
+  background: var(--page);
+  color: var(--text);
 }
 
 html {
@@ -18,4 +40,25 @@ html {
 *::before,
 *::after {
   box-sizing: inherit;
+}
+
+/* Thin overlay-style scrollbars: no light track down the side of the window. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.24);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
