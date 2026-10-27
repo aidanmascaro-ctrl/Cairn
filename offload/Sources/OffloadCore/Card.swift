@@ -60,10 +60,11 @@ public enum Card {
     /// Sony card-level files the camera rebuilds itself (DATABASE.BIN, MEDIAPRO.XML, CUEUP.XML,
     /// in-camera LUTs, AVF_INFO indexes): never copied from a card, and binned when Tidy finds
     /// them in a shoot copied by hand. `folders` is the path inside the card or shoot; only
-    /// files under PRIVATE/ or M4ROOT/ count, so nothing outside a Sony card's folders is touched.
+    /// files under PRIVATE/, M4ROOT/ or a top-level SONY/ (SONYCARD.IND, PRO/LUT) count, so
+    /// nothing outside a Sony card's folders is touched.
     static func isSonyHousekeeping(_ url: URL, in folders: [String]) -> Bool {
         let upper = folders.map { $0.uppercased() }
-        guard upper.contains("PRIVATE") || upper.contains("M4ROOT") else { return false }
+        guard upper.contains("PRIVATE") || upper.contains("M4ROOT") || upper.first == "SONY" else { return false }
         if upper.contains("CLIP") || upper.contains("THMBNL") || upper.contains("SUB") { return false }  // a clip's own files
         let name = url.lastPathComponent.uppercased()
         let ext = url.pathExtension.lowercased()

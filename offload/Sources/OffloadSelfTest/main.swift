@@ -850,6 +850,25 @@ func datesShootFromItsFootage() throws {
     expect(ShootLibrary.footageDate(in: try tempDir()) == nil, "no footage, no date")
 }
 
+func clearsEmptyCardFolders() throws {
+    // A Sony card copied by hand, sorted: M4ROOT and SONY are left with nothing in them.
+    let shoot = try tempDir()
+    let fm = FileManager.default
+    _ = try write([1], to: shoot.appendingPathComponent("Footage/A7S III/C0001.MP4"))
+    for dir in ["M4ROOT/SUB", "M4ROOT/TAKE", "SONY/PRO/LUT", "Project"] {
+        try fm.createDirectory(at: shoot.appendingPathComponent(dir), withIntermediateDirectories: true)
+    }
+    _ = try write([], to: shoot.appendingPathComponent("M4ROOT/.DS_Store"))
+    _ = try write([], to: shoot.appendingPathComponent("SONY/SONYCARD.IND"))
+    let plan = ShootTidy.plan(shoot)
+    expect(plan.emptyCardFolders == ["M4ROOT"], "an empty card folder is found, sub-folders and all")
+    expect(plan.destination(.bin)?.bundles.map(\.type) == ["IND"], "the card index in SONY/ goes in the Bin")
+    expect(plan.hasChanges, "so the shoot isn't called sorted")
+    try ShootTidy.apply(plan)
+    let left = try fm.contentsOfDirectory(atPath: shoot.path).filter { !$0.hasPrefix(".") }.sorted()
+    expect(left == ["Footage", "Project"], "card folders gone; an empty Project folder stays")
+}
+
 func renamesShootAndFollowsRecords() throws {
     let client = try tempDir()
     let shoot = client.appendingPathComponent("13.10.26 Spring launch")
@@ -905,6 +924,7 @@ for (name, test) in [
     ("checksWhichCameraEachFolderIs", { try checksWhichCameraEachFolderIs() }),
     ("resortsLeftoverFolders", { try resortsLeftoverFolders() }),
     ("datesShootFromItsFootage", { try datesShootFromItsFootage() }),
+    ("clearsEmptyCardFolders", { try clearsEmptyCardFolders() }),
     ("renamesShootAndFollowsRecords", { try renamesShootAndFollowsRecords() }),
     ("renamedFoldersKeepTheirAnswers", { try renamedFoldersKeepTheirAnswers() }),
     ("readsBothShootDateStyles", { readsBothShootDateStyles() }),

@@ -132,6 +132,9 @@ public enum ShootTidy {
         /// What the user calls their cameras ("A7S III", "FX30"): offered when a folder's
         /// clips don't say, and accepted as a folder name without asking.
         public var knownCameras: [String] = []
+        /// Card folders at the top of the shoot with nothing left in them ("M4ROOT", "SONY"):
+        /// removed on sort.
+        public var emptyCardFolders: [String] = []
 
         public var cameras: [Destination] { destinations.filter { $0.role == .camera } }
         public func destination(_ role: Destination.Role) -> Destination? { destinations.first { $0.role == role } }
@@ -145,7 +148,9 @@ public enum ShootTidy {
             return counts.map { ($0.key, $0.value) }.sorted { ($0.count, $1.type) > ($1.count, $0.type) }
         }
         /// Something to do: files to move, folders to rename, or new folders to make.
-        public var hasChanges: Bool { fileCount > 0 || !renames.isEmpty || destinations.contains(where: \.userAdded) }
+        public var hasChanges: Bool {
+            fileCount > 0 || !renames.isEmpty || destinations.contains(where: \.userAdded) || !emptyCardFolders.isEmpty
+        }
         public var isEmpty: Bool { !hasChanges && !destinations.contains(where: \.emptyOnDisk) }
 
         /// Two camera folders with the same name (Finder would see one).
@@ -508,7 +513,11 @@ public enum ShootTidy {
         }
         destinations.append(Destination(id: "bin", role: .bin, name: "Goes in the Bin", originalName: nil,
                                         bundles: binned.sorted(by: order)))
-        return SortPlan(shoot: shoot, destinations: destinations, knownCameras: knownCameras)
+        let emptyCardFolders = ShootLibrary.subfolders(of: shoot).map(\.lastPathComponent)
+            .filter { (isLeftoverFolder($0) || $0.uppercased() == "SONY") && isEmptyFolder(shoot.appendingPathComponent($0)) }
+            .sorted()
+        return SortPlan(shoot: shoot, destinations: destinations, knownCameras: knownCameras,
+                        emptyCardFolders: emptyCardFolders)
     }
 
     /// Folder names to remember after a sort: each bundle's learn key -> the name of the
@@ -704,7 +713,9 @@ public enum ShootTidy {
             }
         }
         // Tidy up folders the move emptied (only if nothing but Finder's .DS_Store is left).
-        // (and on up: Footage/Untitled/Thumbnails, then Footage/Untitled).
+        // (and on up: Footage/Untitled/Thumbnails, then Footage/Untitled), and card folders
+        // that were empty already.
+        sourceFolders.formUnion(plan.emptyCardFolders.map { plan.shoot.appendingPathComponent($0) })
         let shootPath = plan.shoot.standardizedFileURL.path
         for start in sourceFolders.sorted(by: { $0.path.count > $1.path.count }) {
             var folder = start.standardizedFileURL
@@ -718,7 +729,8 @@ public enum ShootTidy {
         try Handoff.relocate(shootFolder: plan.shoot, to: plan.shoot) { path in
             mapping[path] ?? current(URL(fileURLWithPath: path), after: renames).path
         }
-        return log.moves.count + renames.count
+        let cardFolders = Set(plan.emptyCardFolders.map { plan.shoot.appendingPathComponent($0).standardizedFileURL.path })
+        return log.moves.count + renames.count + log.removedFolders.filter(cardFolders.contains).count
     }
 
     /// Where a file is after its camera folder was renamed.
@@ -774,10 +786,17 @@ public enum ShootTidy {
         return (restored, skipped)
     }
 
-    /// Holds nothing but Finder's .DS_Store (and exFAT's ._ companions of it).
+    /// Holds nothing but Finder's .DS_Store (and exFAT's ._ companions of it), and folders
+    /// that are empty the same way (a card's bare M4ROOT/SUB, M4ROOT/TAKE).
     static func isEmptyFolder(_ folder: URL) -> Bool {
         guard let items = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return false }
-        return items.allSatisfy { $0 == ".DS_Store" || $0 == "._.DS_Store" }
+        return items.allSatisfy { item in
+            if item == ".DS_Store" || item == "._.DS_Store" { return true }
+            let url = folder.appendingPathComponent(item)
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]))
+                .map { $0.isDirectory == true && $0.isSymbolicLink != true } ?? false
+            return isFolder && isEmptyFolder(url)
+        }
     }
 
     /// Removes `folder` only if it's empty (see `isEmptyFolder`). Returns whether it did.

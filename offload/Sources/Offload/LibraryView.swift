@@ -502,7 +502,7 @@ struct SortPage: View {
                         Text("Check which camera is in \(plan.unchecked.map { "“\($0.name)”" }.joined(separator: ", ")) before sorting.")
                             .font(.caption).foregroundStyle(.orange)
                     } else {
-                        Text(plan.fileCount == 0 && plan.renames.isEmpty
+                        Text(plan.fileCount == 0 && plan.renames.isEmpty && plan.emptyCardFolders.isEmpty
                              ? "Everything is sorted. Rename a folder or drag a file type to reorganise."
                              : "Drag a file type onto a folder to move it. Click a folder's name to rename it.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -561,6 +561,7 @@ struct SortPage: View {
                 Divider().padding(.vertical, 4)
                 if let stay = plan.destination(.stay) { destinationBlock(stay, plan: plan, level: 0) }
                 if let bin = plan.destination(.bin), !bin.bundles.isEmpty { destinationBlock(bin, plan: plan, level: 0) }
+                if !plan.emptyCardFolders.isEmpty { emptyCardFolders(plan) }
             }
             .padding(10)
             .background(GeometryReader { geo in
@@ -571,6 +572,20 @@ struct SortPage: View {
         .frame(height: min(library.reviewContentHeight, LibraryView.listHeight))
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+    }
+
+    /// "M4ROOT, SONY": card folders left with nothing in them, removed on sort.
+    private func emptyCardFolders(_ plan: ShootTidy.SortPlan) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder.badge.minus").foregroundStyle(.secondary).frame(width: 18)
+            Text("Empty card folders").font(.callout).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text("\(plan.emptyCardFolders.joined(separator: ", ")) · removed")
+                .font(.caption).foregroundStyle(Color.accentColor).lineLimit(1)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .help("Card folders with no files left in them. Sort removes them.")
     }
 
     /// One destination: its folder row (rename/remove/count) and its chips. The whole block
@@ -734,7 +749,9 @@ struct SortPage: View {
         let n = plan.fileCount
         if n > 0 { return "Sort \(n) file\(n == 1 ? "" : "s")" }
         let r = plan.renames.count
-        return r > 0 ? "Rename \(r) folder\(r == 1 ? "" : "s")" : "Make folders"
+        if r > 0 { return "Rename \(r) folder\(r == 1 ? "" : "s")" }
+        let e = plan.emptyCardFolders.count
+        return e > 0 ? "Remove \(e) empty folder\(e == 1 ? "" : "s")" : "Make folders"
     }
 
     /// "MP4 204 · from CLIP" — click to see the folder it's in now, drag it to another folder,
