@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <rect width="1200" height="400" rx="24" fill="#16181f"/>
+
+  <!-- Left: what each clip is judged on -->
+  <text x="48" y="62" font-size="24" font-weight="700" fill="#f5f6f8">Every clip, judged on what's in the picture</text>
+  <g font-size="16" fill="#e4e6eb">
+    <g transform="translate(48 92)">
+      <rect width="250" height="112" rx="14" fill="#232733"/>
+      <rect x="18" y="20" width="72" height="52" rx="6" fill="#3a4152"/>
+      <circle cx="54" cy="40" r="10" fill="#c9cdd6"/>
+      <path d="M36 72c0-12 8-18 18-18s18 6 18 18z" fill="#c9cdd6"/>
+      <rect x="28" y="28" width="52" height="40" rx="4" fill="none" stroke="#4f8cff" stroke-width="2.5"/>
+      <text x="104" y="40" font-weight="600">Faces</text>
+      <text x="104" y="62" font-size="13" fill="#9aa1b0">found in sampled</text>
+      <text x="104" y="80" font-size="13" fill="#9aa1b0">frames</text>
+    </g>
+    <g transform="translate(316 92)">
+      <rect width="250" height="112" rx="14" fill="#232733"/>
+      <rect x="18" y="20" width="72" height="52" rx="6" fill="#3a4152"/>
+      <path d="M26 60 C40 30, 58 66, 82 34" fill="none" stroke="#4cc38a" stroke-width="3"/>
+      <path d="M26 66 C40 36, 58 72, 82 40" fill="none" stroke="#4cc38a" stroke-width="2" stroke-opacity="0.5"/>
+      <text x="104" y="40" font-weight="600">Motion</text>
+      <text x="104" y="62" font-size="13" fill="#9aa1b0">a locked-off interview</text>
+      <text x="104" y="80" font-size="13" fill="#9aa1b0">barely moves</text>
+    </g>
+  </g>
+  <text x="48" y="246" font-size="15" fill="#9aa1b0">Compared with clips you've labelled before. Runs on your Mac, no cloud.</text>
+  <text x="48" y="270" font-size="15" fill="#9aa1b0">Unsure? It's marked for a one-click check instead of guessed.</text>
+
+  <!-- Colour legend -->
+  <g transform="translate(48 304)" font-size="16" font-weight="600">
+    <rect width="18" height="18" rx="4" fill="#4f8cff"/><text x="28" y="15" fill="#e4e6eb">A-roll</text>
+    <rect x="130" width="18" height="18" rx="4" fill="#4cc38a"/><text x="158" y="15" fill="#e4e6eb">B-roll</text>
+    <rect x="260" width="18" height="18" rx="4" fill="#f2c94c"/><text x="288" y="15" fill="#e4e6eb">Check me</text>
+  </g>
+
+  <!-- Right: the assembly timeline -->
+  <g transform="translate(640 48)">
+    <rect width="512" height="304" rx="16" fill="#1d2029" stroke="#353b4a"/>
+    <text x="24" y="38" font-size="18" font-weight="700" fill="#f5f6f8">Assembly timeline</text>
+    <text x="24" y="60" font-size="13" fill="#9aa1b0">at the footage's own resolution and frame rate</text>
+    <g font-size="13" font-weight="700" fill="#8b92a1">
+      <text x="24" y="112">V2</text>
+      <text x="24" y="162">V1</text>
+      <text x="24" y="222">A2</text>
+      <text x="24" y="262">A1</text>
+    </g>
+    <line x1="60" y1="80" x2="60" y2="282" stroke="#353b4a"/>
+    <!-- B-roll V2 -->
+    <rect x="72" y="92" width="88" height="30" rx="5" fill="#4cc38a"/>
+    <rect x="166" y="92" width="60" height="30" rx="5" fill="#4cc38a"/>
+    <rect x="232" y="92" width="110" height="30" rx="5" fill="#4cc38a"/>
+    <rect x="348" y="92" width="70" height="30" rx="5" fill="#4cc38a"/>
+    <!-- A-roll V1 -->
+    <rect x="72" y="142" width="170" height="30" rx="5" fill="#4f8cff"/>
+    <rect x="248" y="142" width="140" height="30" rx="5" fill="#4f8cff"/>
+    <rect x="394" y="142" width="96" height="30" rx="5" fill="#4f8cff"/>
+    <!-- Audio -->
+    <rect x="72" y="206" width="346" height="22" rx="5" fill="#4cc38a" fill-opacity="0.35"/>
+    <rect x="72" y="246" width="418" height="22" rx="5" fill="#4f8cff" fill-opacity="0.35"/>
+  </g>
+</svg>
