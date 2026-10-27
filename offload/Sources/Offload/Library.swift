@@ -18,6 +18,10 @@ final class LibraryModel: ObservableObject {
     @Published var reviewing = false
     @Published var renaming: RenameForm?
     @Published var sorting: SortForm?
+    /// The shoot last opened for sorting or renaming: tinted in the list as a "you were here".
+    @Published private(set) var lastShootID: String?
+    /// Set when a page closes; the list scrolls to `lastShootID` once that row is there.
+    var scrollToLastShoot = false
     /// Review-page ticks the user changed from the suggested default (by id).
     @Published var flipped: Set<String> = []
     /// Measured list heights, so lists hug their rows instead of leaving empty space.
@@ -207,7 +211,12 @@ final class LibraryModel: ObservableObject {
         withAnimation(TabSwitcher.glide) { sorting = SortForm(shoot: shoot, folder: folder, library: self) }
     }
 
-    func closePages() {
+    /// Back to the list, at the shoot the page was for. A rename passes the shoot's new id.
+    func closePages(returningTo shootID: String? = nil) {
+        if let id = shootID ?? sorting?.shoot.id ?? renaming?.shoot.id {
+            lastShootID = id
+            scrollToLastShoot = true
+        }
         withAnimation(TabSwitcher.glide) {
             renaming = nil
             sorting = nil
@@ -293,12 +302,17 @@ final class RenameForm: ObservableObject {
 
     var newFolderName: String { ShootTidy.folderName(name: name, date: hasDate ? date : nil) }
     var unchanged: Bool { newFolderName == folder.lastPathComponent }
+    /// The catalog id the shoot has once the rescan picks up its new folder name.
+    private var renamedShootID: String {
+        let parent = (shoot.path as NSString).deletingLastPathComponent as NSString
+        return "\(shoot.driveID)/\(parent.appendingPathComponent(newFolderName))"
+    }
 
     func rename() {
         do {
             let renamed = try ShootTidy.rename(folder, to: newFolderName)
             library?.rescan(containing: renamed)
-            library?.closePages()
+            library?.closePages(returningTo: renamedShootID)
         } catch {
             self.error = error.localizedDescription
         }

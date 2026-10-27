@@ -59,17 +59,36 @@ struct LibraryView: View {
         } else if shoots.isEmpty {
             Text("No shoots match “\(library.query)”.").font(.callout).foregroundStyle(.secondary)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(shoots) { ShootRow(model: model, library: library, shoot: $0, isLast: $0.id == shoots.last?.id) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(shoots) { ShootRow(model: model, library: library, shoot: $0, isLast: $0.id == shoots.last?.id) }
+                    }
+                    .padding(.horizontal, Self.rowInset)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: LibraryHeightKey.self, value: geo.size.height)
+                    })
                 }
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: LibraryHeightKey.self, value: geo.size.height)
-                })
+                .onPreferenceChange(LibraryHeightKey.self) { library.listContentHeight = $0 }
+                .frame(height: min(library.listContentHeight, Self.listHeight))
+                // Rows stay lined up with the search field; the "last shoot" tint gets room either side.
+                .padding(.horizontal, -Self.rowInset)
+                .onAppear { scrollToLastShoot(proxy) }
+                .onChange(of: shoots.map(\.id)) { scrollToLastShoot(proxy) }
             }
-            .onPreferenceChange(LibraryHeightKey.self) { library.listContentHeight = $0 }
-            .frame(height: min(library.listContentHeight, Self.listHeight))
         }
+    }
+
+    static let rowInset: CGFloat = 6
+
+    /// Coming back from a sort or rename: bring that shoot into view. A renamed shoot only
+    /// shows up after its rescan, so this waits for the row rather than giving up.
+    private func scrollToLastShoot(_ proxy: ScrollViewProxy) {
+        guard library.scrollToLastShoot, let id = library.lastShootID,
+              library.results.contains(where: { $0.id == id }) else { return }
+        library.scrollToLastShoot = false
+        // The lazy list lays its rows out after appearing; scroll on the next pass.
+        DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
     }
 
     private var drives: some View {
@@ -164,6 +183,13 @@ private struct ShootRow: View {
             }
         }
         .padding(.vertical, 6)
+        .background {
+            if library.lastShootID == shoot.id {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .padding(.horizontal, -LibraryView.rowInset)
+            }
+        }
         if !isLast { Divider() }
     }
 
@@ -360,7 +386,7 @@ struct LibraryTab: View {
         if let form = library.renaming {
             RenamePage(library: library, form: form).transition(.opacity)
         } else if let form = library.sorting {
-            SortPage(library: library, form: form).transition(.opacity)
+            SortPage(model: model, library: library, form: form).transition(.opacity)
         } else if library.reviewing {
             LibraryReviewView(library: library).transition(.opacity)
         } else {
@@ -411,7 +437,10 @@ struct RenamePage: View {
 /// "Sort footage": a Finder-style tree of where everything will go. Each file type from
 /// each folder is a chip you can drag to another folder; camera folders can be renamed
 /// in place, added and removed. Grey folders are already there, blue ones are new.
+/// Clicking a folder that's already there shows it in Finder.
 struct SortPage: View {
+    /// Only for showing folders in Finder; not observed, so card progress doesn't redraw the tree.
+    let model: AppModel
     @ObservedObject var library: LibraryModel
     @ObservedObject var form: SortForm
 
@@ -490,7 +519,7 @@ struct SortPage: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    folderLine(form.folder.lastPathComponent, level: 0, existing: true, bold: false)
+                    folderLine(form.folder.lastPathComponent, level: 0, existing: true, bold: false, folder: form.folder)
                     Spacer()
                     Menu {
                         Button("Camera folder in Footage") { withAnimation(TabSwitcher.glide) { form.addFolder() } }
@@ -504,7 +533,8 @@ struct SortPage: View {
                     .help("Add a camera, Photos or Project folder, then drag files into it")
                 }
                 if !plan.cameras.isEmpty {
-                    folderLine("Footage", level: 1, existing: footageExists, bold: false)
+                    folderLine("Footage", level: 1, existing: footageExists, bold: false,
+                               folder: footageExists ? plan.shoot.appendingPathComponent("Footage") : nil)
                 }
                 ForEach(plan.cameras) { destinationBlock($0, plan: plan, level: 2) }
                 ForEach(others.filter { plan.shows($0) }) {
@@ -533,7 +563,8 @@ struct SortPage: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 if destination.role == .camera {
-                    folderIcon(existing: existing)
+                    // The name is a rename field, so only the icon opens Finder here.
+                    revealable(onDisk(destination, plan: plan)) { folderIcon(existing: existing) }
                     TextField("Folder name", text: Binding(
                         get: { destination.name },
                         set: { form.rename(destination.id, to: $0) }
@@ -550,8 +581,12 @@ struct SortPage: View {
                               ? "Sony card files the camera rebuilds itself. Sort moves them to the drive's Bin; Undo brings them back."
                               : "")
                 } else {
-                    folderIcon(existing: existing)
-                    Text(destination.name).font(.callout)
+                    revealable(onDisk(destination, plan: plan)) {
+                        HStack(spacing: 6) {
+                            folderIcon(existing: existing)
+                            Text(destination.name).font(.callout)
+                        }
+                    }
                     tag(existing: existing)
                 }
                 Spacer(minLength: 12)
@@ -590,15 +625,38 @@ struct SortPage: View {
         } isTargeted: { form.setDropTarget(destination.id, $0) }
     }
 
-    private func folderLine(_ name: String, level: Int, existing: Bool, bold: Bool) -> some View {
+    private func folderLine(_ name: String, level: Int, existing: Bool, bold: Bool, folder: URL?) -> some View {
         HStack(spacing: 6) {
-            folderIcon(existing: existing)
-            Text(name).font(.callout.weight(bold ? .semibold : .regular)).lineLimit(1)
+            revealable(folder) {
+                HStack(spacing: 6) {
+                    folderIcon(existing: existing)
+                    Text(name).font(.callout.weight(bold ? .semibold : .regular)).lineLimit(1)
+                }
+            }
             tag(existing: existing)
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
         .padding(.leading, CGFloat(level) * Self.indent)
+    }
+
+    /// A folder's icon and name, clickable to show it in Finder once it's on the drive.
+    @ViewBuilder private func revealable<Label: View>(_ folder: URL?, @ViewBuilder label: () -> Label) -> some View {
+        if let folder {
+            Button { model.reveal(folder) } label: { label().contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("Show in Finder")
+        } else {
+            label()
+        }
+    }
+
+    /// Where a folder sits on the drive right now, or nil if it isn't there yet. A camera
+    /// folder renamed on this page keeps its old name on disk until the sort runs.
+    private func onDisk(_ destination: ShootTidy.Destination, plan: ShootTidy.SortPlan) -> URL? {
+        let folder = destination.originalName.map { plan.shoot.appendingPathComponent("Footage").appendingPathComponent($0) }
+            ?? plan.folder(for: destination)
+        return folder.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
     private func folderIcon(existing: Bool) -> some View {
