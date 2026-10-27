@@ -57,6 +57,8 @@ final class CardState: ObservableObject, Identifiable {
     @Published var phase: CardPhase = .scanning
     @Published var files: [MediaFile] = []
     @Published var missing: [MediaFile] = []
+    /// Card file -> where the drive already has it, for files that aren't missing.
+    @Published var copies: [URL: [URL]] = [:]
     @Published var camera: CameraInfo?
     /// Files of types Offload doesn't recognise, by type ("XYZ": 3). Not copied.
     @Published var unknown: [String: Int] = [:]
@@ -100,25 +102,28 @@ final class NewShootForm: ObservableObject {
     let hasPhotos: Bool
 
     /// `date`/`hasPhotos` default to the whole card; a session passes its own.
-    /// `preferLastShoot` is for a single-shoot card (card two follows card one);
+    /// `copied` is where the drive already holds some of these files (a copy that stopped
+    /// part way). `preferLastShoot` is for a single-shoot card (card two follows card one);
     /// sessions prefer a shoot dated the same day instead.
     init(card: CardState, model: AppModel, date: Date? = nil, hasPhotos: Bool? = nil,
-         library: ShootLibrary? = nil, preferLastShoot: Bool = true) {
+         library: ShootLibrary? = nil, copied: [URL] = [], preferLastShoot: Bool = true) {
         self.card = card
         self.library = library ?? model.root.map { ShootLibrary(root: $0, known: model.library.knownClients()) }
         self.date = date ?? card.shootDate
         self.hasPhotos = hasPhotos ?? card.hasPhotos
         camera = model.cameraName(for: card.camera)
-        preselect(preferLastShoot: preferLastShoot)
+        preselect(copied: copied, preferLastShoot: preferLastShoot)
     }
 
-    /// Card two defaults to wherever card one went; otherwise a shoot dated the same
-    /// day; otherwise the most recent client with a new shoot.
-    private func preselect(preferLastShoot: Bool) {
+    /// The rest of a half-copied shoot goes where its first part went, even when the card's
+    /// clips were moved between folders or it ran past midnight. Otherwise card two defaults
+    /// to wherever card one went; otherwise a shoot dated the same day; otherwise the most
+    /// recent client with a new shoot.
+    private func preselect(copied: [URL], preferLastShoot: Bool) {
         guard let library else { return }
         let last = preferLastShoot ? UserDefaults.standard.string(forKey: Self.lastShootKey) : nil
         let sameDay = library.shoots.first { $0.date.map { Calendar.current.isDate($0, inSameDayAs: date) } ?? false }
-        if let match = library.shoots.first(where: { $0.url.path == last }) ?? sameDay {
+        if let match = library.shootHolding(copied) ?? library.shoots.first(where: { $0.url.path == last }) ?? sameDay {
             client = match.client
             shoot = match
         } else {
@@ -255,7 +260,8 @@ final class SessionsForm: ObservableObject {
         drafts = plan.sessions.map { session in
             let form = old[session.id]?.form
                 ?? NewShootForm(card: card, model: model, date: session.start, hasPhotos: session.hasPhotos,
-                                library: library, preferLastShoot: false)
+                                library: library, copied: session.files.flatMap { card.copies[$0.url] ?? [] },
+                                preferLastShoot: false)
             form.camera = camera
             let previous = old[session.id].flatMap { $0.session.files.count == session.files.count ? $0 : nil }
             let draft = SessionDraft(session: session, form: form, missing: session.files.filter { missing.contains($0.url) },
@@ -430,7 +436,7 @@ final class AppModel: ObservableObject {
     func openNewShoot(_ card: CardState) {
         prepare(card) { [weak self] library in
             guard let self else { return }
-            let form = NewShootForm(card: card, model: self, library: library)
+            let form = NewShootForm(card: card, model: self, library: library, copied: card.copies.values.flatMap { $0 })
             self.revealStep = 0
             withAnimation(Self.pageAnimation) { self.newShoot = form }
             self.startReveal(pieces: NewShootView.pieces)
@@ -492,7 +498,12 @@ final class AppModel: ObservableObject {
             let camera = phone ? PhoneSource.camera(on: volume, files: files) : CameraInfo.read(fromCard: volume, files: files)
             if !phone { CardLog.record(volume: volume, camera: camera, files: files, unknown: unknown) }
             // Content match against the whole working drive, so footage filed anywhere counts.
-            let missing = driveVolume.map { DriveIndex(root: $0).missing(from: files) } ?? files
+            let index = driveVolume.map { DriveIndex(root: $0) }
+            let copies = files.reduce(into: [URL: [URL]]()) { found, file in
+                let onDrive = index?.copies(of: file) ?? []
+                if !onDrive.isEmpty { found[file.url] = onDrive }
+            }
+            let missing = files.filter { copies[$0.url] == nil }
             let sessionCount = SessionPlan(files: files).sessions.count
             await MainActor.run {
                 card.sessionCount = sessionCount
@@ -500,6 +511,7 @@ final class AppModel: ObservableObject {
                 card.camera = camera
                 card.unknown = unknown
                 card.missing = missing
+                card.copies = copies
                 card.phase = .ready
             }
         }

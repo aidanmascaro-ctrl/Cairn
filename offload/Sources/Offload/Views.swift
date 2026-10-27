@@ -87,7 +87,7 @@ struct PopoverView: View {
 
     private var cardList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TabSwitcher(tab: $model.tab)
+            TabSwitcher(tab: $model.tab) { if $0 == .library { model.library.showList() } }
             // Both pages stay laid out on top of each other, so switching is a pure
             // cross-fade and nothing is rebuilt; the popover height eases to the new page.
             ZStack(alignment: .topLeading) {
@@ -502,6 +502,8 @@ struct ShootPickers: View {
 /// macOS 26+, a plain fill before that).
 struct TabSwitcher: View {
     @Binding var tab: PopoverTab
+    /// A tab clicked (also when it's already the chosen one).
+    var onSelect: (PopoverTab) -> Void = { _ in }
     @Namespace private var highlight
 
     static let glide = Animation.easeInOut(duration: 0.3)
@@ -510,7 +512,10 @@ struct TabSwitcher: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Self.tabs, id: \.0) { value, title in
-                Button { withAnimation(Self.glide) { tab = value } } label: {
+                Button {
+                    withAnimation(Self.glide) { tab = value }
+                    onSelect(value)
+                } label: {
                     Text(title)
                         .font(.callout.weight(.medium))
                         .foregroundStyle(tab == value ? .primary : .secondary)

@@ -6,11 +6,11 @@ which files it keeps. Offload's rules live in `Sources/OffloadCore/Card.swift` a
 
 Researched 27 Oct 2026. Each fact is tagged:
 
-| Tag | Meaning |
-|---|---|
-| **[V]** | Checked against an official manual, help guide or spec |
+| Tag     | Meaning                                                                                        |
+| ------- | ---------------------------------------------------------------------------------------------- |
+| **[V]** | Checked against an official manual, help guide or spec                                         |
 | **[S]** | Checked against a secondary source (asset-management vendor docs, the PRONOM registry, forums) |
-| **[U]** | Unverified: general knowledge, not yet seen on a real card |
+| **[U]** | Unverified: general knowledge, not yet seen on a real card                                     |
 
 ## Learning from new cards
 
@@ -49,14 +49,14 @@ counts. Drives that look like cards are kept out of the Library.
 
 **3. What gets copied:**
 
-| Class | Kept? | Examples |
-|---|---|---|
-| Media | yes | video, photos and raw, recorder WAV/MP3 |
-| Per-clip sidecars | yes, in `<Camera>/Metadata` | Sony `M01.XML`, Canon `.CIF/.CPF/.SIF`, DJI `.SRT`, RED `.RMD`, BRAW `.sidecar`, Nikon `.NDF`, Zoom `.hprj`, iPhone `.AAE` |
-| Thumbnails and low-res proxies | yes, in `<Camera>/Thumbnails` | `.THM`, Sony `THMBNL/*.JPG`, DJI `.LRF`, GoPro/Insta360 `.LRV` |
-| Photo edits | yes, in Photos | `.xmp .pp3 .dop .cos .on1` |
-| Card housekeeping | no (never deleted from the card) | Sony `MEDIAPRO.XML`, `CUEUP.XML`, `.BIN`, `.IND`, `AVF_INFO`; DPOF `.MRK`; Nikon `NC_FLLST.DAT`; Panasonic `BACKUP.TMP`; Tascam `.sys`; in-camera LUT `.cube` files |
-| Unknown | **no, flagged on the card and logged** | anything else |
+| Class                          | Kept?                                  | Examples                                                                                                                                                            |
+| ------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Media                          | yes                                    | video, photos and raw, recorder WAV/MP3                                                                                                                             |
+| Per-clip sidecars              | yes, in `<Camera>/Metadata`            | Sony `M01.XML`, Canon `.CIF/.CPF/.SIF`, DJI `.SRT`, RED `.RMD`, BRAW `.sidecar`, Nikon `.NDF`, Zoom `.hprj`, iPhone `.AAE`                                          |
+| Thumbnails and low-res proxies | yes, in `<Camera>/Thumbnails`          | `.THM`, Sony `THMBNL/*.JPG`, DJI `.LRF`, GoPro/Insta360 `.LRV`                                                                                                      |
+| Photo edits                    | yes, in Photos                         | `.xmp .pp3 .dop .cos .on1`                                                                                                                                          |
+| Card housekeeping              | no (never deleted from the card)       | Sony `MEDIAPRO.XML`, `CUEUP.XML`, `.BIN`, `.IND`, `AVF_INFO`; DPOF `.MRK`; Nikon `NC_FLLST.DAT`; Panasonic `BACKUP.TMP`; Tascam `.sys`; in-camera LUT `.cube` files |
+| Unknown                        | **no, flagged on the card and logged** | anything else                                                                                                                                                       |
 
 A sidecar is only kept when its clip is on the card. Sony's card-wide XML is skipped.
 
@@ -103,15 +103,15 @@ Offload skips all hidden files.
 
 ### Gotchas that apply to every brand
 
-| Gotcha | Cameras | What to do |
-|---|---|---|
-| Clips split across several files | GoPro chapters, RED `_00n.R3D`, AVCHD `.MTS`, Canon XF, DJI, Zoom over 2 GB, FAT32 cards at 4 GB | Never show one piece as its own shot; keep structured trees whole |
-| Proxies | Sony `S03`; Nikon `.MP4` with the same name as the `.NEV`; GoPro `GL…LRV`; DJI `.LRF`; Insta360 `LRV_` | Keep the proxy beside its master, and don't count it as a clip |
-| Duplicates on two cards | Sony, Canon, Lumix, Fuji, Nikon dual-slot recording | Offload already de-duplicates by content |
-| File counters restart | Every DCF camera; Fuji wraps 9999 → 9001; Lumix, OM and Fuji reset on format | Never assume a file name is unique within a shoot |
-| Same names on two cameras | `C0001.MP4`, `DSC_0001`, `GX010001`, `ZOOM0001` | One folder per camera. Same-named files get " (2)" |
-| Renamed root folders and file prefixes | Sony "Cam ID + Reel#", Lumix, Fuji, OM, Ricoh, Pentax | Identify the camera from metadata, not from the names |
-| Model codes that aren't product names | DJI `FC3582`, Sony `ILCE-7SM3` | Offload names Sony bodies itself (A7S III); rename anything else once and it's remembered |
+| Gotcha                                 | Cameras                                                                                                | What to do                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Clips split across several files       | GoPro chapters, RED `_00n.R3D`, AVCHD `.MTS`, Canon XF, DJI, Zoom over 2 GB, FAT32 cards at 4 GB       | Never show one piece as its own shot; keep structured trees whole                         |
+| Proxies                                | Sony `S03`; Nikon `.MP4` with the same name as the `.NEV`; GoPro `GL…LRV`; DJI `.LRF`; Insta360 `LRV_` | Keep the proxy beside its master, and don't count it as a clip                            |
+| Duplicates on two cards                | Sony, Canon, Lumix, Fuji, Nikon dual-slot recording                                                    | Offload already de-duplicates by content                                                  |
+| File counters restart                  | Every DCF camera; Fuji wraps 9999 → 9001; Lumix, OM and Fuji reset on format                           | Never assume a file name is unique within a shoot                                         |
+| Same names on two cameras              | `C0001.MP4`, `DSC_0001`, `GX010001`, `ZOOM0001`                                                        | One folder per camera. Same-named files get " (2)"                                        |
+| Renamed root folders and file prefixes | Sony "Cam ID + Reel#", Lumix, Fuji, OM, Ricoh, Pentax                                                  | Identify the camera from metadata, not from the names                                     |
+| Model codes that aren't product names  | DJI `FC3582`, Sony `ILCE-7SM3`                                                                         | Offload names Sony bodies itself (A7S III); rename anything else once and it's remembered |
 
 ---
 

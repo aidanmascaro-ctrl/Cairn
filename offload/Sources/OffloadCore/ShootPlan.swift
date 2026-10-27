@@ -72,6 +72,7 @@ public struct ShootPlan: Sendable {
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Untitled" : trimmed
+        // "." or ".." would point at the shoot folder itself (a crafted card's model name).
+        return trimmed.isEmpty || trimmed.allSatisfy({ $0 == "." }) ? "Untitled" : trimmed
     }
 }

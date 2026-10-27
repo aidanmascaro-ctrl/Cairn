@@ -484,13 +484,17 @@ struct SortPage: View {
                     tree(plan)
                     if let duplicate = plan.duplicateName {
                         Text("Two folders are called “\(duplicate)”. Rename one.").font(.caption).foregroundStyle(.red)
+                    } else if !plan.unchecked.isEmpty {
+                        Text("Check which camera is in \(plan.unchecked.map { "“\($0.name)”" }.joined(separator: ", ")) before sorting.")
+                            .font(.caption).foregroundStyle(.orange)
                     } else {
                         Text(plan.fileCount == 0 && plan.renames.isEmpty
                              ? "Everything is sorted. Rename a folder or drag a file type to reorganise."
                              : "Drag a file type onto a folder to move it. Click a folder's name to rename it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    footer(primary: plan.hasChanges && plan.duplicateName == nil ? (actionLabel(plan), form.sort) : nil)
+                    footer(primary: plan.hasChanges && plan.duplicateName == nil ? (actionLabel(plan), form.sort) : nil,
+                           ready: plan.unchecked.isEmpty)
                 }
             case .sorting:
                 status("Moving files…")
@@ -515,7 +519,7 @@ struct SortPage: View {
 
     private func tree(_ plan: ShootTidy.SortPlan) -> some View {
         let footageExists = FileManager.default.fileExists(atPath: plan.shoot.appendingPathComponent("Footage").path)
-        let others = plan.destinations.filter { ($0.role == .photos || $0.role == .project) }
+        let others = plan.destinations.filter { [.photos, .project, .assets].contains($0.role) }
         return ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
@@ -530,7 +534,7 @@ struct SortPage: View {
                         Label("New folder", systemImage: "folder.badge.plus")
                     }
                     .menuStyle(.borderlessButton).fixedSize().font(.caption)
-                    .help("Add a camera, Photos or Project folder, then drag files into it")
+                    .help("Add a camera, Photos, Project or Assets folder, then drag files into it")
                 }
                 if !plan.cameras.isEmpty {
                     folderLine("Footage", level: 1, existing: footageExists, bold: false,
@@ -607,6 +611,9 @@ struct SortPage: View {
                     .help("Remove this folder; its files stay where they are")
                 }
             }
+            if let check = plan.cameraCheck(destination) {
+                cameraCheck(check, destination: destination, plan: plan)
+            }
             if !destination.bundles.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(destination.bundles) { chip($0, plan: plan) }
@@ -623,6 +630,32 @@ struct SortPage: View {
             withAnimation(TabSwitcher.glide) { ids.forEach { form.move($0, to: destination.id) } }
             return true
         } isTargeted: { form.setDropTarget(destination.id, $0) }
+    }
+
+    /// Under a camera folder whose name doesn't match its clips: rename it in one click, or keep it.
+    private func cameraCheck(_ check: ShootTidy.CameraCheck, destination: ShootTidy.Destination,
+                             plan: ShootTidy.SortPlan) -> some View {
+        let picks: [String] = switch check {
+        case .unknown: plan.suggestions(for: destination)
+        case .differs(let camera): [camera]
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            Label(check == .unknown ? "Which camera shot these? The files don't say."
+                    : "These clips are from the \(picks[0]), not “\(destination.name)”.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange)
+            FlowLayout(spacing: 6) {
+                ForEach(picks, id: \.self) { camera in
+                    Button(check == .unknown ? camera : "Rename to \(camera)") {
+                        withAnimation(TabSwitcher.glide) { form.rename(destination.id, to: camera) }
+                    }
+                }
+                Button("Keep “\(destination.name)”") { withAnimation(TabSwitcher.glide) { form.keepCameraName(destination.id) } }
+                    .help("Not a camera name, and that's fine for this shoot")
+            }
+            .controlSize(.small)
+        }
+        .padding(.leading, 24)
     }
 
     private func folderLine(_ name: String, level: Int, existing: Bool, bold: Bool, folder: URL?) -> some View {
@@ -740,7 +773,8 @@ struct SortPage: View {
         return "\(camera)\(names)\(more), now in \(from)"
     }
 
-    private func footer(primary: (String, () -> Void)?) -> some View {
+    /// `ready` false greys out the primary button until something on the page is answered.
+    private func footer(primary: (String, () -> Void)?, ready: Bool = true) -> some View {
         HStack {
             if form.canUndo {
                 Button("Undo last sort") { form.undo() }
@@ -752,6 +786,7 @@ struct SortPage: View {
                 Button(primary.0, action: primary.1)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(!ready)
             } else {
                 // Nothing left to do on this page: Return closes it.
                 Button("Done") { library.closePages() }

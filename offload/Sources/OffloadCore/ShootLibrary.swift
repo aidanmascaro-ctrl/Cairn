@@ -81,6 +81,18 @@ public struct ShootLibrary: Sendable {
         return parts.isEmpty ? url.lastPathComponent : parts.joined(separator: " › ")
     }
 
+    /// The shoot already holding the most of these drive files: where the rest of a card
+    /// that was half copied belongs, whatever its dates say or wherever it was moved on the card.
+    public func shootHolding(_ copies: [URL]) -> ExistingShoot? {
+        let paths = copies.map(\.standardizedFileURL.path)
+        let counts = shoots.map { shoot in
+            let folder = shoot.url.standardizedFileURL.path + "/"
+            return (shoot, paths.filter { $0.hasPrefix(folder) }.count)
+        }
+        guard let best = counts.max(by: { $0.1 < $1.1 }), best.1 > 0 else { return nil }
+        return best.0
+    }
+
     // MARK: Detection
 
     static func isShoot(_ url: URL) -> Bool {

@@ -1,15 +1,24 @@
 import Foundation
 @testable import OffloadCore
 
-// Read-only preview of how a real card splits: swift run OffloadSelfTest --sessions /Volumes/Card
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--sessions" {
+// Read-only preview of how a real card splits: swift run OffloadSelfTest --sessions /Volumes/Card [/Volumes/Drive]
+// With a drive, also shows what's left to copy and which shoot already holds the rest.
+if [3, 4].contains(CommandLine.arguments.count), CommandLine.arguments[1] == "--sessions" {
     let card = URL(fileURLWithPath: CommandLine.arguments[2])
+    let drive = CommandLine.arguments.count == 4 ? URL(fileURLWithPath: CommandLine.arguments[3]) : nil
+    let index = drive.map { DriveIndex(root: $0) }
+    let library = drive.map { ShootLibrary(root: $0) }
     let f = DateFormatter()
     f.dateFormat = "EEE d MMM HH:mm"
     for s in SessionPlan(files: Card.mediaFiles(on: card)).sessions {
         let thumbs = s.files.filter { $0.kind == .thumbnail }.count
         let meta = s.files.filter { $0.kind == .metadata }.count
         print("\(f.string(from: s.start)) -> \(f.string(from: s.end))  clips \(s.clipCount), photos \(s.photoCount), thumbs \(thumbs), xml/lut \(meta), \(ByteCountFormatter.string(fromByteCount: s.bytes, countStyle: .file))")
+        guard let index, let library else { continue }
+        let copies = s.files.map { index.copies(of: $0) }
+        let left = copies.filter(\.isEmpty).count
+        let shoot = library.shootHolding(copies.flatMap { $0 }).map { library.label(for: $0.url) } ?? "none yet"
+        print("    \(left) of \(s.files.count) files left to copy; already in: \(shoot)")
     }
     exit(0)
 }
@@ -19,6 +28,7 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--plan" {
     let plan = ShootTidy.plan(URL(fileURLWithPath: CommandLine.arguments[2]))
     for d in plan.destinations {
         print("\(d.role) \(d.name): \(d.bundles.map { "\($0.type)×\($0.files.count) [\($0.origin)]" }.joined(separator: ", "))")
+        if let check = plan.cameraCheck(d) { print("  camera check: \(check)") }
     }
     exit(0)
 }
@@ -250,6 +260,52 @@ func findsNestedClientsAndShoots() throws {
     let plan = ShootPlan(shootFolder: library.shoots[0].url, camera: "FX30", hasPhotos: false)
     expect(plan.footageFolder.standardizedFileURL == shoot.appendingPathComponent("Footage/FX30").standardizedFileURL,
            "second card joins the existing Footage/FX30")
+}
+
+func resumesHalfCopiedShootMovedAroundTheCard() throws {
+    // The real 13 Oct night shoot: the after-midnight half was moved by hand into M4ROOT/acme,
+    // and an earlier copy into ACME/261013 15 spring launch stopped part way.
+    let cal = Calendar.current
+    func at(_ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    }
+    let card = try tempDir(), drive = try tempDir()
+    func clip(_ path: String, _ seed: UInt8, _ date: Date) throws {
+        let url = card.appendingPathComponent(path)
+        _ = try write((0..<64).map { UInt8($0) &+ seed }, to: url)
+        try FileManager.default.setAttributes([.creationDate: date], ofItemAtPath: url.path)
+    }
+    try clip("M4ROOT/CLIP/C0337.MP4", 1, at(13, 23, 45))
+    try clip("M4ROOT/acme/C0338.MP4", 2, at(14, 0, 7))
+    try clip("M4ROOT/acme/C0398.MP4", 3, at(14, 1, 30))
+    let shoot = drive.appendingPathComponent("ACME/261013 15 spring launch")
+    for (name, seed) in [("C0337.MP4", UInt8(1)), ("C0338.MP4", 2)] {
+        _ = try write((0..<64).map { UInt8($0) &+ seed }, to: shoot.appendingPathComponent("Footage/A7S III/\(name)"))
+    }
+    // Decoys: a shoot dated the after-midnight day, and a stray copy outside any shoot.
+    _ = try write([9], to: drive.appendingPathComponent("Other/261014 Gig/Footage/FX30/C0001.MP4"))
+    _ = try write((0..<64).map { UInt8($0) &+ 2 }, to: drive.appendingPathComponent("Marley/vid/untitled folder/C0338.MP4"))
+
+    let files = Card.mediaFiles(on: card)
+    expect(files.filter { $0.kind == .video }.count == 3, "clips moved into another card folder are still found")
+    var sessions = SessionPlan(files: files)
+    expect(sessions.sessions.count == 1, "the night stays one session across midnight and both folders")
+
+    let index = DriveIndex(root: drive)
+    let copies = Dictionary(uniqueKeysWithValues: files.map { ($0.url, index.copies(of: $0)) })
+    expect(files.filter { copies[$0.url]!.isEmpty }.map(\.url.lastPathComponent) == ["C0398.MP4"],
+           "only the clip the stopped copy never reached is left to copy")
+
+    let library = ShootLibrary(root: drive)
+    func target(_ session: CardSession) -> String? {
+        library.shootHolding(session.files.flatMap { copies[$0.url] ?? [] })?.folderName
+    }
+    expect(target(sessions.sessions[0]) == "261013 15 spring launch", "the rest goes where the first part went")
+    sessions.splitByDay(sessions.sessions[0])
+    expect(sessions.sessions.count == 2, "split by day still works")
+    expect(target(sessions.sessions[1]) == "261013 15 spring launch",
+           "after a split, the after-midnight half still joins its shoot, not the shoot dated that day")
+    expect(library.shootHolding([]) == nil, "nothing copied yet: falls back to the usual pick")
 }
 
 func parsesLsofOutput() {
@@ -511,6 +567,25 @@ func photoOnlyShootDropsEmptyFootageAndProject() throws {
            && fm.fileExists(atPath: shoot.appendingPathComponent("Project").path), "video shoot keeps Project")
 }
 
+func sortsMusicIntoAssets() throws {
+    let shoot = try tempDir().appendingPathComponent("260723 1 4 summer days")
+    let fm = FileManager.default
+    _ = try write([1], to: shoot.appendingPathComponent("vids/C0001.MP4"))
+    _ = try write([2], to: shoot.appendingPathComponent("song.m4a"))
+    _ = try write([3], to: shoot.appendingPathComponent("Assets/bed.flac"))  // already sorted
+    var plan = ShootTidy.plan(shoot)
+    let assets = plan.destination(.assets)!
+    expect(assets.bundles.map(\.type).sorted() == ["FLAC", "M4A"] && assets.incoming == 1
+           && plan.destination(.stay)!.bundles.isEmpty && assets.bundles.allSatisfy { $0.label == "music" },
+           "loose .m4a goes to Assets, labelled music; Assets/ is already sorted")
+    expect(plan.shows(assets), "Assets shows in the tree")
+    try ShootTidy.apply(plan)
+    expect(fm.fileExists(atPath: shoot.appendingPathComponent("Assets/song.m4a").path)
+           && fm.fileExists(atPath: shoot.appendingPathComponent("Assets/bed.flac").path), "song moved into Assets")
+    plan = ShootTidy.plan(shoot)
+    expect(plan.destination(.assets)!.incoming == 0, "nothing to move on a second look")
+}
+
 func binsSonyHousekeepingCopiedByHand() throws {
     // A Sony card dragged in with Finder: the clip is sorted, the card's own files go in the Bin.
     let shoot = try tempDir().appendingPathComponent("BAND/fx30")
@@ -662,6 +737,43 @@ func stabilisedClipsGoWithTheirCamera() throws {
            "stabilised clips and the Gyroflow file go to <camera>/Stabilised")
 }
 
+func checksWhichCameraEachFolderIs() throws {
+    func xml(_ model: String) -> [UInt8] {
+        Array(#"<NonRealTimeMeta><Device manufacturer="Sony" modelName="\#(model)" serialNo="1"/></NonRealTimeMeta>"#.utf8)
+    }
+    // Gyroflow exports put in Footage/vid by hand: nothing in them says which camera.
+    let shoot = try tempDir()
+    _ = try write([1], to: shoot.appendingPathComponent("Footage/vid/C0496_stabilized.mov"))
+    _ = try write([2], to: shoot.appendingPathComponent("Footage/FX30/C9973.MP4"))
+    _ = try write(xml("ILME-FX30"), to: shoot.appendingPathComponent("Footage/FX30/Metadata/C9973M01.XML"))
+    var plan = ShootTidy.plan(shoot, knownCameras: ["A7S III", "FX30"])
+    let vid = plan.cameras.first { $0.name == "vid" }!
+    let fx30 = plan.cameras.first { $0.name == "FX30" }!
+    expect(plan.cameraCheck(vid) == .unknown && plan.cameraCheck(fx30) == nil && plan.unchecked.map(\.name) == ["vid"],
+           "a folder of clips that don't name their camera is asked about; FX30's clips say FX30")
+    expect(plan.suggestions(for: vid) == ["A7S III"], "offers the known cameras not already in the shoot")
+    plan.destinations[plan.destinations.firstIndex { $0.id == vid.id }!].name = "a7s iii"
+    expect(plan.unchecked.isEmpty, "naming it after a known camera answers the check")
+    plan.destinations[plan.destinations.firstIndex { $0.id == vid.id }!].name = "vid"
+    plan.keepCameraName(vid.id)
+    expect(plan.unchecked.isEmpty, "keeping the name answers it too")
+    expect(ShootTidy.plan(shoot, knownCameras: ["A7S III"], kept: ["vid"]).unchecked.isEmpty, "a kept name isn't asked again")
+
+    // Real A7S III clips sorted into a folder called vid: the files say it's the wrong name.
+    let misnamed = try tempDir()
+    _ = try write([1], to: misnamed.appendingPathComponent("Footage/vid/C0001.MP4"))
+    _ = try write(xml("ILCE-7SM3"), to: misnamed.appendingPathComponent("Footage/vid/Metadata/C0001M01.XML"))
+    let wrong = ShootTidy.plan(misnamed)
+    expect(wrong.cameras.first.map(wrong.cameraCheck) == .differs("A7S III"), "a folder named for the wrong camera is caught")
+
+    // Loose clips get their camera's name, so there's nothing to ask.
+    let loose = try tempDir()
+    _ = try write([1], to: loose.appendingPathComponent("vid/C0001.MP4"))
+    _ = try write(xml("ILCE-7SM3"), to: loose.appendingPathComponent("vid/C0001M01.XML"))
+    let fine = ShootTidy.plan(loose)
+    expect(fine.cameras.map(\.name) == ["A7S III"] && fine.unchecked.isEmpty, "clips named by their camera need no check")
+}
+
 func resortsLeftoverFolders() throws {
     // An earlier sort left Footage/CLIP (stabilised exports) and Footage/Untitled/Thumbnails.
     let shoot = try tempDir()
@@ -750,9 +862,11 @@ for (name, test) in [
     ("offersLibraryClientsFromOtherDrives", { try offersLibraryClientsFromOtherDrives() }),
     ("sortsLooseFootageAndUndoes", { try sortsLooseFootageAndUndoes() }),
     ("binsSonyHousekeepingCopiedByHand", { try binsSonyHousekeepingCopiedByHand() }),
+    ("sortsMusicIntoAssets", { try sortsMusicIntoAssets() }),
     ("learnsFolderNamesFromWhatsInThem", { try learnsFolderNamesFromWhatsInThem() }),
     ("eachCameraKeepsItsOwnSidecars", { try eachCameraKeepsItsOwnSidecars() }),
     ("stabilisedClipsGoWithTheirCamera", { try stabilisedClipsGoWithTheirCamera() }),
+    ("checksWhichCameraEachFolderIs", { try checksWhichCameraEachFolderIs() }),
     ("resortsLeftoverFolders", { try resortsLeftoverFolders() }),
     ("renamesShootAndFollowsRecords", { try renamesShootAndFollowsRecords() }),
     ("renamedFoldersKeepTheirAnswers", { try renamedFoldersKeepTheirAnswers() }),
@@ -770,6 +884,7 @@ for (name, test) in [
     ("parsesSonyCameraXML", { parsesSonyCameraXML() }),
     ("plansBackedStyleFolders", { plansBackedStyleFolders() }),
     ("matchesByContentNotName", { try matchesByContentNotName() }),
+    ("resumesHalfCopiedShootMovedAroundTheCard", { try resumesHalfCopiedShootMovedAroundTheCard() }),
     ("copiesVerifiesAndNeverOverwrites", { try copiesVerifiesAndNeverOverwrites() }),
     ("sameNamedFilesBothSurviveBackToBack", { try sameNamedFilesBothSurviveBackToBack() }),
     ("handoffWritesSidecarAndInbox", { try handoffWritesSidecarAndInbox() }),

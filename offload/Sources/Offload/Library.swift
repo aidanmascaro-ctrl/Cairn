@@ -201,6 +201,28 @@ final class LibraryModel: ObservableObject {
         UserDefaults.standard.set(learnedNames.merging(names) { $1 }, forKey: learnedNamesKey)
     }
 
+    /// What the user calls their cameras: names given to bodies when copying a card, and
+    /// folder names chosen for a camera on a sort. Offered when a folder's clips don't say.
+    static var knownCameras: [String] {
+        let bodies = (UserDefaults.standard.dictionary(forKey: "cameraNames") as? [String: String] ?? [:]).values
+        let sorted = learnedNames.filter { $0.key.hasPrefix("model:") }.values
+        var seen = Set<String>()
+        return (Array(bodies) + Array(sorted)).sorted().filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Camera folder names kept on the sort page although they aren't a known camera, by shoot.
+    static let keptCameraFoldersKey = "keptCameraFolders"
+    static func keptCameraFolders(in shoot: URL) -> Set<String> {
+        let kept = UserDefaults.standard.dictionary(forKey: keptCameraFoldersKey) as? [String: [String]] ?? [:]
+        return Set(kept[shoot.standardizedFileURL.path] ?? [])
+    }
+    static func keepCameraFolder(_ name: String, in shoot: URL) {
+        var kept = UserDefaults.standard.dictionary(forKey: keptCameraFoldersKey) as? [String: [String]] ?? [:]
+        let path = shoot.standardizedFileURL.path
+        kept[path] = Array(Set(kept[path] ?? []).union([name.lowercased()])).sorted()
+        UserDefaults.standard.set(kept, forKey: keptCameraFoldersKey)
+    }
+
     func startRename(_ shoot: CatalogShoot) {
         guard let folder = folder(of: shoot) else { return }
         withAnimation(TabSwitcher.glide) { renaming = RenameForm(shoot: shoot, folder: folder, library: self) }
@@ -221,6 +243,14 @@ final class LibraryModel: ObservableObject {
             renaming = nil
             sorting = nil
         }
+    }
+
+    /// The Library tab clicked: back to the shoot list from any page, except mid-sort (the
+    /// files are moving; the page shows how it went).
+    func showList() {
+        if case .sorting = sorting?.stage { return }
+        closePages()
+        withAnimation(TabSwitcher.glide) { reviewing = false }
     }
 
     func chooseNoteLocation() {
@@ -340,13 +370,12 @@ final class SortForm: ObservableObject {
         self.folder = folder
         self.library = library
         canUndo = ShootTidy.canUndoSort(folder)
-        let name = library.cameraName
-        let learned = LibraryModel.learnedNames
+        let read = Self.planner(folder, name: library.cameraName)
         // Reading camera tags blocks a thread per clip, so stay off Swift's shared task pool.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var plan = ShootTidy.plan(folder, name: name, learned: learned)
+            var plan = read()
             if ShootTidy.removeUnusedFolders(plan) {  // drop empty Footage/Camera folders from the tree too
-                plan = ShootTidy.plan(folder, name: name, learned: learned)
+                plan = read()
             }
             DispatchQueue.main.async {
                 self?.plan = plan
@@ -363,17 +392,30 @@ final class SortForm: ObservableObject {
     /// Back to the tree after a sort or undo, re-read from the drive, to keep tidying.
     func reload() {
         stage = .planning
-        let name = library?.cameraName ?? { $0.shortName }
-        let learned = LibraryModel.learnedNames
-        let folder = folder
+        let read = Self.planner(folder, name: library?.cameraName ?? { $0.shortName })
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let plan = ShootTidy.plan(folder, name: name, learned: learned)
+            let plan = read()
             DispatchQueue.main.async {
                 self?.plan = plan
                 self?.stage = .ready
             }
         }
     }
+    /// Reads the shoot into a plan, with the names learned and kept so far (read now, on main).
+    private static func planner(_ folder: URL, name: @escaping (CameraInfo) -> String) -> () -> ShootTidy.SortPlan {
+        let learned = LibraryModel.learnedNames
+        let known = LibraryModel.knownCameras
+        let kept = LibraryModel.keptCameraFolders(in: folder)
+        return { ShootTidy.plan(folder, name: name, learned: learned, knownCameras: known, kept: kept) }
+    }
+
+    /// "Keep “vid”": the folder isn't named after a camera, and that's fine for this shoot.
+    func keepCameraName(_ destination: String) {
+        guard let name = plan?.destinations.first(where: { $0.id == destination })?.name else { return }
+        plan?.keepCameraName(destination)
+        LibraryModel.keepCameraFolder(ShootPlan.clean(name), in: folder)
+    }
+
     func addFolder() { plan?.addCameraFolder() }
     func add(_ role: ShootTidy.Destination.Role) { plan?.add(role) }
     func remove(_ destination: String) { plan?.remove(destination) }

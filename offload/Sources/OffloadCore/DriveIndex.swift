@@ -26,11 +26,14 @@ public final class DriveIndex {
         }
     }
 
-    public func contains(_ file: MediaFile) -> Bool {
+    public func contains(_ file: MediaFile) -> Bool { !copies(of: file).isEmpty }
+
+    /// Every file on the drive with the same content as `file` — where it was copied to before.
+    public func copies(of file: MediaFile) -> [URL] {
         guard let candidates = bySize[file.size],
               let wanted = Self.fingerprint(file.url, size: file.size)
-        else { return false }
-        return candidates.contains { fingerprint(of: $0, size: file.size) == wanted }
+        else { return [] }
+        return candidates.filter { fingerprint(of: $0, size: file.size) == wanted }
     }
 
     /// Records a file that was just copied, so a re-scan doesn't need to re-walk the drive.

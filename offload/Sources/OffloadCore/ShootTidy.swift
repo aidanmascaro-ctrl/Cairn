@@ -70,10 +70,14 @@ public enum ShootTidy {
         public var stabilised = false
         /// Sony card housekeeping copied over by hand: the only files allowed in the Bin.
         public var housekeeping = false
+        /// The folder name the camera that shot these clips gets ("A7S III", or a saved
+        /// "A-cam"), when the files say which camera. Checked against the folder they're in.
+        public var cameraName: String?
 
         public var isSidecar: Bool { kind == .thumbnail || kind == .metadata }
         public var label: String {
             if stabilised { return kind == .video ? "stabilised" : "stabilisation" }
+            if Card.musicExtensions.contains(type.lowercased()) { return "music" }
             return switch kind {
             case .video: "clips"
             case .photo: "photos"
@@ -87,7 +91,7 @@ public enum ShootTidy {
 
     /// A folder files can go to.
     public struct Destination: Identifiable, Sendable, Hashable {
-        public enum Role: Sendable, Hashable { case camera, photos, project, stay, bin }
+        public enum Role: Sendable, Hashable { case camera, photos, project, assets, stay, bin }
         public let id: String
         public let role: Role
         /// Camera folder name inside Footage/ (editable); fixed for the others.
@@ -101,6 +105,8 @@ public enum ShootTidy {
         /// A camera folder already on the drive with nothing in it (e.g. Footage/GR III from a
         /// photo-only card) — offered for removal.
         public var emptyOnDisk = false
+        /// A name kept on the sort page although it isn't a camera we know ("vid").
+        public var keptName: String?
 
         public var fileCount: Int { bundles.reduce(0) { $0 + $1.files.count } }
         /// Files that will move into this folder (not counting ones already here).
@@ -110,10 +116,22 @@ public enum ShootTidy {
         public var types: [String] { Array(Set(bundles.map(\.type))).sorted() }
     }
 
+    /// Why a camera folder's name needs a look before sorting.
+    public enum CameraCheck: Equatable, Sendable {
+        /// Its clips don't say which camera shot them (Gyroflow exports, renders) and the
+        /// name isn't one of the user's cameras.
+        case unknown
+        /// Its clips were shot on this camera, but the folder is called something else.
+        case differs(String)
+    }
+
     public struct SortPlan: Sendable {
         public let shoot: URL
-        /// Footage/<camera> folders, then Photos, Project, and "stays where it is".
+        /// Footage/<camera> folders, then Photos, Project, Assets, and "stays where it is".
         public var destinations: [Destination]
+        /// What the user calls their cameras ("A7S III", "FX30"): offered when a folder's
+        /// clips don't say, and accepted as a folder name without asking.
+        public var knownCameras: [String] = []
 
         public var cameras: [Destination] { destinations.filter { $0.role == .camera } }
         public func destination(_ role: Destination.Role) -> Destination? { destinations.first { $0.role == role } }
@@ -137,14 +155,37 @@ public enum ShootTidy {
             return nil
         }
 
-        /// Footage/<name>, Photos, Project — after any rename.
+        /// Footage/<name>, Photos, Project, Assets — after any rename.
         public func folder(for destination: Destination) -> URL? {
             switch destination.role {
             case .camera: shoot.appendingPathComponent("Footage").appendingPathComponent(ShootPlan.clean(destination.name))
             case .photos: shoot.appendingPathComponent("Photos")
             case .project: shoot.appendingPathComponent("Project")
+            case .assets: shoot.appendingPathComponent("Assets")
             case .stay, .bin: nil
             }
+        }
+
+        /// Whether a camera folder's name matches the camera its clips came from.
+        public func cameraCheck(_ destination: Destination) -> CameraCheck? {
+            let clips = destination.bundles.filter { $0.kind == .video }
+            let name = ShootPlan.clean(destination.name).lowercased()
+            guard destination.role == .camera, !clips.isEmpty, name != destination.keptName?.lowercased() else { return nil }
+            var shotOn: [String: Int] = [:]
+            for bundle in clips { if let camera = bundle.cameraName { shotOn[camera, default: 0] += bundle.files.count } }
+            if let most = shotOn.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key {
+                return shotOn.keys.contains { $0.lowercased() == name } ? nil : .differs(most)
+            }
+            return knownCameras.contains { $0.lowercased() == name } ? nil : .unknown
+        }
+
+        /// Camera folders to look at before sorting.
+        public var unchecked: [Destination] { cameras.filter { cameraCheck($0) != nil } }
+
+        /// Known cameras a folder could be named after: not ones another folder already has.
+        public func suggestions(for destination: Destination) -> [String] {
+            let taken = Set(cameras.filter { $0.id != destination.id }.map { ShootPlan.clean($0.name).lowercased() })
+            return knownCameras.filter { !taken.contains($0.lowercased()) }
         }
 
         public func exists(_ destination: Destination) -> Bool {
@@ -180,15 +221,21 @@ public enum ShootTidy {
             return folder.id
         }
 
-        /// Whether Photos/Project belong in the tree: on the drive already, getting files, or
-        /// added by hand. A photo-only shoot shows no Footage or Project.
+        /// Whether Photos/Project/Assets belong in the tree: on the drive already, getting files,
+        /// or added by hand. A photo-only shoot shows no Footage or Project.
         public func shows(_ destination: Destination) -> Bool {
             destination.fileCount > 0 || destination.userAdded || exists(destination)
         }
 
-        /// "New folder ▸ Photos/Project": made on Sort even if nothing is dragged into it.
+        /// "New folder ▸ Photos/Project/Assets": made on Sort even if nothing is dragged into it.
         public mutating func add(_ role: Destination.Role) {
             if let i = destinations.firstIndex(where: { $0.role == role }) { destinations[i].userAdded = true }
+        }
+
+        /// "Keep the name": the folder's current name stands without a camera check.
+        public mutating func keepCameraName(_ id: String) {
+            guard let i = destinations.firstIndex(where: { $0.id == id }) else { return }
+            destinations[i].keptName = ShootPlan.clean(destinations[i].name)
         }
 
         /// Removes a new camera folder from the plan; whatever was going into it stays where
@@ -201,17 +248,23 @@ public enum ShootTidy {
         }
     }
 
+    /// Clips read per already-sorted bundle to tell which camera it holds.
+    static let clipsSampled = 3
+
     /// Folders inside a shoot that are already sorted.
-    static let sortedFolders: Set<String> = ["footage", "photos", "project"]
+    static let sortedFolders: Set<String> = ["footage", "photos", "project", "assets"]
 
     /// The whole shoot as a tree of destinations: what's already in Footage/<camera>, Photos
     /// and Project stays there (and can be renamed or moved), and everything loose is placed
     /// where it would normally go — clips (with their thumbnails and XML) in a folder per
-    /// camera, photos and their edits in Photos, anything else left where it is.
+    /// camera, photos and their edits in Photos, music in Assets, anything else left where it is.
     /// `name` turns a detected camera into a folder name (saved names like "A-cam" apply);
     /// `learned` holds folder names chosen on earlier sorts, by `Bundle.learnKey`.
+    /// `knownCameras` are what the user calls their cameras; `kept` (lowercased) are camera
+    /// folder names in this shoot already kept on the sort page. Both feed `cameraCheck`.
     public static func plan(_ shoot: URL, name: (CameraInfo) -> String = { $0.shortName },
-                            learned: [String: String] = [:]) -> SortPlan {
+                            learned: [String: String] = [:], knownCameras: [String] = [],
+                            kept: Set<String> = []) -> SortPlan {
         var all: [URL] = []
         let keys: [URLResourceKey] = [.isRegularFileKey]
         let walker = FileManager.default.enumerator(at: shoot, includingPropertiesForKeys: keys,
@@ -227,6 +280,8 @@ public enum ShootTidy {
         }
         func isMedia(_ url: URL) -> Bool { Card.mediaExtensions.contains(url.pathExtension.lowercased()) }
         func kind(_ url: URL) -> MediaFile.Kind? { isMedia(url) ? Card.kind(of: url) : nil }
+        /// The folder a camera's clips go in: the name chosen for it on an earlier sort, else its own.
+        func folderName(_ camera: CameraInfo) -> String { ShootPlan.clean(learned["model:\(camera.model)"] ?? name(camera)) }
 
         // Camera folders by lowercased name: (display name, name on disk, bundles).
         var cameras: [String: (name: String, original: String?, bundles: [Bundle])] = [:]
@@ -236,6 +291,7 @@ public enum ShootTidy {
         }
         var photos: [Bundle] = []
         var project: [Bundle] = []
+        var assets: [Bundle] = []
         var stay: [Bundle] = []
         var housekeeping: [String: [URL]] = [:]
 
@@ -279,7 +335,7 @@ public enum ShootTidy {
                 } else {
                     homed["\(p.joined(separator: "/"))|\(url.pathExtension.uppercased())", default: []].append(url)
                 }
-            } else if top == "photos" || top == "project" {
+            } else if top == "photos" || top == "project" || top == "assets" {
                 homed["\(p.joined(separator: "/"))|\(url.pathExtension.uppercased())", default: []].append(url)
             } else {
                 loose.append(url)
@@ -296,12 +352,18 @@ public enum ShootTidy {
                     cameraOfStem[clipKey(url)] = folder
                     cameraOfAnyStem[stemKey(url)] = folder
                 }
-                let bundle = Bundle(id: "home:\(key)", type: type, origin: split[0], kind: kind(files[0]), files: files,
-                                    camera: nil, home: "camera:\(folder.lowercased())", learnKey: nil)
+                // A few clips are enough to say which camera the folder holds.
+                let shotOn = kind(files[0]) == .video ? files.prefix(Self.clipsSampled).lazy.compactMap(camera(ofClip:)).first : nil
+                var bundle = Bundle(id: "home:\(key)", type: type, origin: split[0], kind: kind(files[0]), files: files,
+                                    camera: shotOn, home: "camera:\(folder.lowercased())", learnKey: nil)
+                bundle.cameraName = shotOn.map(folderName)
                 cameras[folder.lowercased(), default: (folder, folder, [])].bundles.append(bundle)
             case "photos":
                 photos.append(Bundle(id: "home:\(key)", type: type, origin: split[0], kind: kind(files[0]), files: files,
                                      camera: nil, home: "photos", learnKey: nil))
+            case "assets":
+                assets.append(Bundle(id: "home:\(key)", type: type, origin: split[0], kind: kind(files[0]), files: files,
+                                     camera: nil, home: "assets", learnKey: nil))
             default:
                 project.append(Bundle(id: "home:\(key)", type: type, origin: split[0], kind: kind(files[0]), files: files,
                                       camera: nil, home: "project", learnKey: nil))
@@ -316,8 +378,7 @@ public enum ShootTidy {
             let fromName = (from as NSString).lastPathComponent
             let type = url.pathExtension.uppercased()
             let learnKey = model.map { "model:\($0.model)" } ?? "from:\(fromName.lowercased())|\(type)"
-            let suggested = learned[learnKey] ?? model.map(name) ?? (from.isEmpty ? "Camera" : fromName)
-            let folder = ShootPlan.clean(suggested)
+            let folder = model.map(folderName) ?? ShootPlan.clean(learned[learnKey] ?? (from.isEmpty ? "Camera" : fromName))
             let key = "\(from)|\(type)|\(folder)"
             clipGroups[key, default: (model, folder, learnKey, [])].files.append(url)
             cameraOfStem[clipKey(url)] = folder
@@ -330,14 +391,16 @@ public enum ShootTidy {
         // Gyroflow project files go with the stabilised clips in their folder.
         var stabVotes: [String: [String: Int]] = [:]
         var stabGroups: [String: [URL]] = [:]
+        var stabNamed: Set<String> = []  // groups whose own files named the camera
         for url in loose where kind(url) == .video {
             guard let source = stabilisedSource(url) else { continue }
             let from = parts(url).joined(separator: "/")
-            let folder = cameraOfAnyStem[source]
-                ?? camera(ofClip: url).map { ShootPlan.clean(learned["model:\($0.model)"] ?? name($0)) }
-                ?? cameraOfFolder[from]
+            let named = cameraOfAnyStem[source] == nil ? camera(ofClip: url).map(folderName) : nil
+            let folder = cameraOfAnyStem[source] ?? named ?? cameraOfFolder[from]
                 ?? ShootPlan.clean(from.isEmpty ? "Camera" : (from as NSString).lastPathComponent)
-            stabGroups["\(from)|\(url.pathExtension.uppercased())|\(folder)", default: []].append(url)
+            let key = "\(from)|\(url.pathExtension.uppercased())|\(folder)"
+            stabGroups[key, default: []].append(url)
+            if named != nil { stabNamed.insert(key) }
             stabVotes[from, default: [:]][folder, default: 0] += 1
         }
         for url in loose where url.pathExtension.lowercased() == "gyroflow" {
@@ -348,15 +411,17 @@ public enum ShootTidy {
         }
         for (key, files) in stabGroups {
             let split = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            let bundle = Bundle(id: "stab:\(key)", type: split[1], origin: split[0], kind: kind(files[0]), files: files,
+            var bundle = Bundle(id: "stab:\(key)", type: split[1], origin: split[0], kind: kind(files[0]), files: files,
                                 camera: nil, home: "stay", learnKey: nil, stabilised: true)
+            if stabNamed.contains(key) { bundle.cameraName = split[2] }
             cameras[split[2].lowercased(), default: (split[2], nil, [])].bundles.append(bundle)
         }
         let stabFiles = Set(stabGroups.values.joined())
         for (key, group) in clipGroups {
             let split = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            let bundle = Bundle(id: key, type: split[1], origin: split[0], kind: .video, files: group.files,
+            var bundle = Bundle(id: key, type: split[1], origin: split[0], kind: .video, files: group.files,
                                 camera: group.camera, home: "stay", learnKey: group.learnKey)
+            if group.camera != nil { bundle.cameraName = group.folder }
             cameras[group.folder.lowercased(), default: (group.folder, nil, [])].bundles.append(bundle)
         }
 
@@ -365,7 +430,7 @@ public enum ShootTidy {
             guard url.pathExtension.lowercased() == "xml",
                   let xml = try? String(contentsOf: url, encoding: .utf8),
                   let info = CameraInfo.parse(sonyXML: xml) else { return nil }
-            return ShootPlan.clean(learned["model:\(info.model)"] ?? name(info))
+            return folderName(info)
         }
 
         // The rest of the loose files, by (folder, type); sidecars follow their clip's camera.
@@ -396,6 +461,7 @@ public enum ShootTidy {
             let bundle = Bundle(id: key, type: split[1].isEmpty ? "FILE" : split[1], origin: split[0], kind: k,
                                 files: files, camera: nil, home: "stay",
                                 learnKey: k == nil ? "from:\(fromName)|\(split[1])" : nil)
+            if Card.musicExtensions.contains(split[1].lowercased()) { assets.append(bundle); continue }
             switch k {
             case .photo, .photoEdit: photos.append(bundle)  // edit sidecars (.xmp) stay with their photos
             case .thumbnail?, .metadata?:
@@ -414,12 +480,15 @@ public enum ShootTidy {
             return Destination(id: "camera:\(key)", role: .camera, name: c.name, originalName: c.original,
                                bundles: c.bundles.sorted(by: order),
                                emptyOnDisk: c.original != nil && c.bundles.isEmpty
-                                   && isEmptyFolder(footage.appendingPathComponent(c.original!)))
+                                   && isEmptyFolder(footage.appendingPathComponent(c.original!)),
+                               keptName: kept.contains(c.name.lowercased()) ? c.name : nil)
         }
         destinations.append(Destination(id: "photos", role: .photos, name: "Photos", originalName: nil,
                                         bundles: photos.sorted(by: order)))
         destinations.append(Destination(id: "project", role: .project, name: "Project", originalName: nil,
                                         bundles: project.sorted(by: order)))
+        destinations.append(Destination(id: "assets", role: .assets, name: "Assets", originalName: nil,
+                                        bundles: assets.sorted(by: order)))
         destinations.append(Destination(id: "stay", role: .stay, name: "Stays where it is", originalName: nil,
                                         bundles: stay.sorted(by: order)))
         let binned = housekeeping.map { key, files in
@@ -431,7 +500,7 @@ public enum ShootTidy {
         }
         destinations.append(Destination(id: "bin", role: .bin, name: "Goes in the Bin", originalName: nil,
                                         bundles: binned.sorted(by: order)))
-        return SortPlan(shoot: shoot, destinations: destinations)
+        return SortPlan(shoot: shoot, destinations: destinations, knownCameras: knownCameras)
     }
 
     /// Folder names to remember after a sort: each bundle's learn key -> the name of the
@@ -489,7 +558,8 @@ public enum ShootTidy {
     static func camera(ofClip url: URL) -> CameraInfo? {
         let folder = url.deletingLastPathComponent()
         let stem = url.deletingPathExtension().lastPathComponent
-        for sidecar in ["\(stem)M01.XML", "\(stem)M01.xml"] {
+        // Beside the clip on a card; in Metadata/ once sorted.
+        for sidecar in ["\(stem)M01.XML", "\(stem)M01.xml", "Metadata/\(stem)M01.XML", "Metadata/\(stem)M01.xml"] {
             if let xml = try? String(contentsOf: folder.appendingPathComponent(sidecar), encoding: .utf8),
                let info = CameraInfo.parse(sonyXML: xml) { return info }
         }

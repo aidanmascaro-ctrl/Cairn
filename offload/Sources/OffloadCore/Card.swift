@@ -45,6 +45,9 @@ public enum Card {
     /// Edit sidecars from Lightroom/Camera Raw (.xmp), RawTherapee, DxO, Capture One, ON1,
     /// Photomator (.photo-edit) — they belong next to their photo, always in Photos.
     static let photoEditExtensions: Set<String> = ["xmp", "pp3", "dop", "cos", "on1", "photo-edit"]
+    /// Music and other audio no camera or recorder writes (a track laid under the edit): it
+    /// goes in the shoot's Assets folder. Recorder WAV/MP3 stay clips (above).
+    static let musicExtensions: Set<String> = ["m4a", "aac", "flac", "aif", "aiff", "ogg", "opus"]
     static let mediaExtensions = videoExtensions
         .union(photoExtensions).union(thumbnailExtensions).union(metadataExtensions).union(photoEditExtensions)
     /// Card housekeeping the camera rebuilds itself: Sony's card database (.BIN/.IND, AVF_INFO),
