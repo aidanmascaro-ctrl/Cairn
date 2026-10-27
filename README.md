@@ -52,16 +52,31 @@ Drop a shoot folder (or a shoot Offload just copied) onto the Cairn panel in Res
 5. **Pull selects.** Every clip is scored for focus, exposure and steadiness, and the strongest moments are laid out on their own timeline.
 
 <p align="center">
+  <img src="docs/readme/cairn-ingest.png" alt="The Cairn panel in Resolve, listing shoots Offload has copied, ready to sort" width="80%">
+</p>
+<p align="center"><sub>Shoots Offload has copied wait at the top of the panel, one click from being sorted into Resolve.</sub></p>
+
+<p align="center">
   <img src="docs/readme/classify.svg" alt="Clips classified by faces and motion, coloured, and laid out on an assembly timeline" width="100%">
 </p>
 
 Classification runs entirely on your Mac. It samples frames from each clip, looks for faces and measures how much the picture moves (a locked-off interview barely does), then compares the clip with ones you've labelled before. Audio isn't used, because a live mic on the subject during B-roll would fool it. When Cairn isn't sure, it marks the clip yellow for a one-click check rather than guessing.
 
 <p align="center">
+  <img src="docs/readme/cairn-classify.png" alt="Classify results: 24 A-roll, 21 B-roll and 3 clips to check, each with a thumbnail and A-roll or B-roll buttons" width="49%" valign="top">
+  <img src="docs/readme/cairn-timeline.png" alt="Assembly timeline built in Resolve: 3840x2160 at 25 fps, 24 A-roll clips on V1 and 21 B-roll on V2" width="49%" valign="top">
+</p>
+
+<p align="center">
   <img src="docs/readme/selects.svg" alt="A score line across a clip, with the high runs marked as selects" width="100%">
 </p>
 
-Selects needs no AI model: the same footage and settings always give the same selects. Pick a preset (All-Rounder, Talking Head, Social Media, Action / Sport), tune it without re-analysing, and build the selects timeline. Optionally, Cairn can learn your taste from the selects you keep, using your own Anthropic API key.
+Selects needs no AI model: the same footage and settings always give the same selects. Pick one of nine presets (All-Rounder, Talking Head, Social Media, Drone / Aerial, Locked-Off and more), tune it without re-analysing, and build the selects timeline. Optionally, Cairn can learn your taste from the selects you keep, using your own Anthropic API key.
+
+<p align="center">
+  <img src="docs/readme/cairn-selects.png" alt="The Selects panel: 30 selects covering 3m 23s of 11m 27s, a score chart, presets, tuning sliders and each clip's score strip with its selects outlined" width="70%">
+</p>
+<p align="center"><sub>The Classify, timeline and Selects screenshots show the real panel running on sample data.</sub></p>
 
 ---
 
