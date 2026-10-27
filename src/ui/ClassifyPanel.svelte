@@ -59,10 +59,11 @@
   let showErrorDetail = false;
   let lastResolveReason: string | null = null;
 
-  let progressLogEl: HTMLDivElement | undefined;
+  // Null once the log is gone (Svelte clears bind:this when the run finishes).
+  let progressLogEl: HTMLDivElement | null | undefined;
 
   afterUpdate(() => {
-    if (progressLogEl !== undefined) {
+    if (progressLogEl) {
       progressLogEl.scrollTop = progressLogEl.scrollHeight;
     }
   });
