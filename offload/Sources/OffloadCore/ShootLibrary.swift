@@ -134,6 +134,23 @@ public struct ShootLibrary: Sendable {
         return result
     }
 
+    /// When a shoot's footage was shot: the earliest clip or photo in it, each by the older of
+    /// its created and modified dates (a copy can reset one, rarely both). Sidecars and edits
+    /// are left out. nil when the folder holds no footage.
+    public static func footageDate(in shoot: URL) -> Date? {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .creationDateKey, .contentModificationDateKey]
+        guard let walker = FileManager.default.enumerator(at: shoot, includingPropertiesForKeys: keys,
+                                                          options: [.skipsHiddenFiles]) else { return nil }
+        let footage = Card.videoExtensions.union(Card.photoExtensions)
+        var earliest: Date?
+        for case let url as URL in walker where footage.contains(url.pathExtension.lowercased()) {
+            guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
+                  let shot = [v.creationDate, v.contentModificationDate].compactMap({ $0 }).min() else { continue }
+            earliest = min(earliest ?? shot, shot)
+        }
+        return earliest
+    }
+
     /// "260729 Pod" (yyMMdd, the house style) -> (29 Jul 2026, "Pod").
     /// Also reads the older dotted "15.10.26 2 Harvest Dinner" -> (15 Oct 2026, "2 Harvest Dinner").
     public static func splitDate(_ folderName: String) -> (date: Date?, name: String) {

@@ -747,9 +747,9 @@ func checksWhichCameraEachFolderIs() throws {
     _ = try write([2], to: shoot.appendingPathComponent("Footage/FX30/C9973.MP4"))
     _ = try write(xml("ILME-FX30"), to: shoot.appendingPathComponent("Footage/FX30/Metadata/C9973M01.XML"))
     var plan = ShootTidy.plan(shoot, knownCameras: ["A7S III", "FX30"])
-    let vid = plan.cameras.first { $0.name == "vid" }!
+    let vid = plan.cameras.first { $0.name == "Vid" }!
     let fx30 = plan.cameras.first { $0.name == "FX30" }!
-    expect(plan.cameraCheck(vid) == .unknown && plan.cameraCheck(fx30) == nil && plan.unchecked.map(\.name) == ["vid"],
+    expect(plan.cameraCheck(vid) == .unknown && plan.cameraCheck(fx30) == nil && plan.unchecked.map(\.name) == ["Vid"],
            "a folder of clips that don't name their camera is asked about; FX30's clips say FX30")
     expect(plan.suggestions(for: vid) == ["A7S III"], "offers the known cameras not already in the shoot")
     plan.destinations[plan.destinations.firstIndex { $0.id == vid.id }!].name = "a7s iii"
@@ -801,7 +801,7 @@ func learnsFolderNamesFromWhatsInThem() throws {
     _ = try write(Array(xml.utf8), to: shoot.appendingPathComponent("CLIP/C0001M01.XML"))
     _ = try write([2], to: shoot.appendingPathComponent("render/final.MOV"))
     var plan = ShootTidy.plan(shoot)
-    let render = plan.cameras.first { $0.name == "render" }!
+    let render = plan.cameras.first { $0.name == "Render" }!
     let fx3 = plan.cameras.first { $0.name == "FX3" }!
     for (id, name) in [(render.id, "Renders"), (fx3.id, "A-cam")] {
         if let i = plan.destinations.firstIndex(where: { $0.id == id }) { plan.destinations[i].name = name }
@@ -813,6 +813,41 @@ func learnsFolderNamesFromWhatsInThem() throws {
     _ = try write([4], to: next.appendingPathComponent("render/still.png"))
     expect(ShootTidy.plan(next, learned: learned).cameras.map(\.name) == ["Renders"], "next shoot suggests the learned name")
     expect(ShootTidy.plan(next).destination(.stay)?.types == ["PNG"], "folders list their file types")
+}
+
+func capitalisesFolderNames() throws {
+    // A folder named after a lowercase folder starts with a capital, like Footage and Photos.
+    let shoot = try tempDir()
+    _ = try write([1], to: shoot.appendingPathComponent("render/final.MOV"))
+    _ = try write([2], to: shoot.appendingPathComponent("Footage/drone/DJI_0001.MP4"))
+    _ = try write([3], to: shoot.appendingPathComponent("Footage/iPhone/IMG_0001.MOV"))
+    _ = try write([4], to: shoot.appendingPathComponent("Footage/fx3/C0001.MP4"))
+    let plan = ShootTidy.plan(shoot)
+    expect(plan.cameras.map(\.name).sorted() == ["Drone", "Render", "fx3", "iPhone"],
+           "lowercase names get a capital; ones with capitals or digits are left alone")
+    expect(plan.renames.map(\.originalName) == ["drone"], "an existing lowercase folder is renamed on sort")
+    try ShootTidy.apply(plan)
+    let names = try FileManager.default.contentsOfDirectory(atPath: shoot.appendingPathComponent("Footage").path)
+    expect(names.contains("Drone") && names.contains("Render") && !names.contains("drone"),
+           "the case-only rename lands on disk")
+}
+
+func datesShootFromItsFootage() throws {
+    // "11 oct ricoh" has no date in its name: Rename offers the day the footage was shot.
+    let shoot = try tempDir()
+    let fm = FileManager.default
+    let day = { (d: Int) in DateComponents(calendar: .current, year: 2025, month: 10, day: d, hour: 14).date! }
+    let shot = try write([1], to: shoot.appendingPathComponent("R0001234.JPG"))
+    let later = try write([2], to: shoot.appendingPathComponent("Footage/R0001300.MOV"))
+    let copied = try write([3], to: shoot.appendingPathComponent("R0001235.DNG"))
+    let edit = try write([4], to: shoot.appendingPathComponent("R0001234.xmp"))
+    try fm.setAttributes([.creationDate: day(11), .modificationDate: day(11)], ofItemAtPath: shot.url.path)
+    try fm.setAttributes([.creationDate: day(12), .modificationDate: day(12)], ofItemAtPath: later.url.path)
+    // Copied without its created date: the older modified date still says when it was shot.
+    try fm.setAttributes([.creationDate: day(20), .modificationDate: day(11)], ofItemAtPath: copied.url.path)
+    try fm.setAttributes([.creationDate: day(1), .modificationDate: day(1)], ofItemAtPath: edit.url.path)
+    expect(ShootLibrary.footageDate(in: shoot) == day(11), "earliest photo or clip, ignoring sidecars")
+    expect(ShootLibrary.footageDate(in: try tempDir()) == nil, "no footage, no date")
 }
 
 func renamesShootAndFollowsRecords() throws {
@@ -864,10 +899,12 @@ for (name, test) in [
     ("binsSonyHousekeepingCopiedByHand", { try binsSonyHousekeepingCopiedByHand() }),
     ("sortsMusicIntoAssets", { try sortsMusicIntoAssets() }),
     ("learnsFolderNamesFromWhatsInThem", { try learnsFolderNamesFromWhatsInThem() }),
+    ("capitalisesFolderNames", { try capitalisesFolderNames() }),
     ("eachCameraKeepsItsOwnSidecars", { try eachCameraKeepsItsOwnSidecars() }),
     ("stabilisedClipsGoWithTheirCamera", { try stabilisedClipsGoWithTheirCamera() }),
     ("checksWhichCameraEachFolderIs", { try checksWhichCameraEachFolderIs() }),
     ("resortsLeftoverFolders", { try resortsLeftoverFolders() }),
+    ("datesShootFromItsFootage", { try datesShootFromItsFootage() }),
     ("renamesShootAndFollowsRecords", { try renamesShootAndFollowsRecords() }),
     ("renamedFoldersKeepTheirAnswers", { try renamedFoldersKeepTheirAnswers() }),
     ("readsBothShootDateStyles", { readsBothShootDateStyles() }),

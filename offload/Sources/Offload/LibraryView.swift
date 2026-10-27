@@ -17,9 +17,10 @@ struct LibraryView: View {
                 .textFieldStyle(.roundedBorder)
             results
             Divider()
-            drives
+            // Inset like the shoot rows, so the drives and footer line up with them.
+            drives.padding(.horizontal, scrollerGutter)
             Divider()
-            footer
+            footer.padding(.horizontal, scrollerGutter)
         }
         // Clicking empty space ends editing a drive note.
         .background(Color.clear.contentShape(Rectangle()).onTapGesture {
@@ -65,6 +66,7 @@ struct LibraryView: View {
                         ForEach(shoots) { ShootRow(model: model, library: library, shoot: $0, isLast: $0.id == shoots.last?.id) }
                     }
                     .padding(.horizontal, Self.rowInset)
+                    .padding(.leading, scrollerGutter)
                     .background(GeometryReader { geo in
                         Color.clear.preference(key: LibraryHeightKey.self, value: geo.size.height)
                     })
@@ -75,11 +77,23 @@ struct LibraryView: View {
                 .padding(.horizontal, -Self.rowInset)
                 .onAppear { scrollToLastShoot(proxy) }
                 .onChange(of: shoots.map(\.id)) { scrollToLastShoot(proxy) }
+                .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+                    scrollerStyle = NSScroller.preferredScrollerStyle
+                }
             }
         }
     }
 
     static let rowInset: CGFloat = 6
+
+    @State private var scrollerStyle = NSScroller.preferredScrollerStyle
+
+    /// An always-shown scroll bar takes its own lane on the right; give the left the same room
+    /// so the rows sit evenly. Overlay scroll bars, or a list too short to scroll, take none.
+    private var scrollerGutter: CGFloat {
+        guard scrollerStyle == .legacy, library.listContentHeight > Self.listHeight else { return 0 }
+        return NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+    }
 
     /// Coming back from a sort or rename: bring that shoot into view. A renamed shoot only
     /// shows up after its rescan, so this waits for the row rather than giving up.
@@ -723,7 +737,8 @@ struct SortPage: View {
         return r > 0 ? "Rename \(r) folder\(r == 1 ? "" : "s")" : "Make folders"
     }
 
-    /// "MP4 204 · from CLIP" — drag it to another folder, or right-click to pick one.
+    /// "MP4 204 · from CLIP" — click to see the folder it's in now, drag it to another folder,
+    /// or right-click to pick one.
     private func chip(_ bundle: ShootTidy.Bundle, plan: ShootTidy.SortPlan) -> some View {
         HStack(spacing: 4) {
             Text(bundle.type).font(.caption.weight(.semibold).monospaced())
@@ -734,6 +749,8 @@ struct SortPage: View {
         .padding(.vertical, 3)
         .background(moving(bundle, plan: plan) ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(.quaternary),
                     in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture { model.reveal(plan.shoot.appendingPathComponent(bundle.origin)) }
         .help(chipHelp(bundle))
         .draggable(bundle.id) {
             Text("\(bundle.type) ×\(bundle.files.count)").font(.caption.weight(.semibold))
@@ -770,7 +787,7 @@ struct SortPage: View {
         let more = bundle.files.count > 3 ? " and \(bundle.files.count - 3) more" : ""
         let camera = bundle.camera.map { "Shot on \($0.model). " } ?? ""
         let from = bundle.origin.isEmpty ? "the shoot folder" : bundle.origin
-        return "\(camera)\(names)\(more), now in \(from)"
+        return "\(camera)\(names)\(more), now in \(from). Click to show in Finder."
     }
 
     /// `ready` false greys out the primary button until something on the page is answered.

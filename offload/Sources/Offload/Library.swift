@@ -326,8 +326,10 @@ final class RenameForm: ObservableObject {
         self.library = library
         let current = ShootLibrary.splitDate(folder.lastPathComponent)
         name = current.name.isEmpty ? folder.lastPathComponent : current.name
-        hasDate = current.date != nil
-        date = current.date ?? Date()
+        // No date in the name: offer the day the footage was shot.
+        let dated = current.date ?? ShootLibrary.footageDate(in: folder)
+        hasDate = dated != nil
+        date = dated ?? Date()
     }
 
     var newFolderName: String { ShootTidy.folderName(name: name, date: hasDate ? date : nil) }

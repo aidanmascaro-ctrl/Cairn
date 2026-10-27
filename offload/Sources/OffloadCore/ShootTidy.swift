@@ -254,6 +254,14 @@ public enum ShootTidy {
     /// Folders inside a shoot that are already sorted.
     static let sortedFolders: Set<String> = ["footage", "photos", "project", "assets"]
 
+    /// "render" -> "Render": a camera folder named after a lowercase folder starts with a
+    /// capital, like Footage and Photos. A lowercase one already on the drive is renamed on
+    /// sort. Names with a capital or a digit ("iPhone", "fx3") are left as they are.
+    static func titled(_ name: String) -> String {
+        guard let first = name.first, name == name.lowercased(), !name.contains(where: \.isNumber) else { return name }
+        return first.uppercased() + name.dropFirst()
+    }
+
     /// The whole shoot as a tree of destinations: what's already in Footage/<camera>, Photos
     /// and Project stays there (and can be renamed or moved), and everything loose is placed
     /// where it would normally go — clips (with their thumbnails and XML) in a folder per
@@ -287,7 +295,7 @@ public enum ShootTidy {
         var cameras: [String: (name: String, original: String?, bundles: [Bundle])] = [:]
         let footage = shoot.appendingPathComponent("Footage")
         for existing in ShootLibrary.subfolders(of: footage).map(\.lastPathComponent) where !isLeftoverFolder(existing) {
-            cameras[existing.lowercased()] = (existing, existing, [])
+            cameras[existing.lowercased()] = (titled(existing), existing, [])
         }
         var photos: [Bundle] = []
         var project: [Bundle] = []
@@ -378,7 +386,7 @@ public enum ShootTidy {
             let fromName = (from as NSString).lastPathComponent
             let type = url.pathExtension.uppercased()
             let learnKey = model.map { "model:\($0.model)" } ?? "from:\(fromName.lowercased())|\(type)"
-            let folder = model.map(folderName) ?? ShootPlan.clean(learned[learnKey] ?? (from.isEmpty ? "Camera" : fromName))
+            let folder = model.map(folderName) ?? titled(ShootPlan.clean(learned[learnKey] ?? (from.isEmpty ? "Camera" : fromName)))
             let key = "\(from)|\(type)|\(folder)"
             clipGroups[key, default: (model, folder, learnKey, [])].files.append(url)
             cameraOfStem[clipKey(url)] = folder
@@ -397,7 +405,7 @@ public enum ShootTidy {
             let from = parts(url).joined(separator: "/")
             let named = cameraOfAnyStem[source] == nil ? camera(ofClip: url).map(folderName) : nil
             let folder = cameraOfAnyStem[source] ?? named ?? cameraOfFolder[from]
-                ?? ShootPlan.clean(from.isEmpty ? "Camera" : (from as NSString).lastPathComponent)
+                ?? titled(ShootPlan.clean(from.isEmpty ? "Camera" : (from as NSString).lastPathComponent))
             let key = "\(from)|\(url.pathExtension.uppercased())|\(folder)"
             stabGroups[key, default: []].append(url)
             if named != nil { stabNamed.insert(key) }
