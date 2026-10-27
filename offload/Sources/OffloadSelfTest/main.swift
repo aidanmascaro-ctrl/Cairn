@@ -550,19 +550,20 @@ func sortsLooseFootageAndUndoes() throws {
     _ = try write([5], to: shoot.appendingPathComponent("notes.pdf"))
     _ = try write([7], to: shoot.appendingPathComponent("pics/IMG_0001.xmp"))     // Lightroom edit, with its photo
     _ = try write([8], to: shoot.appendingPathComponent("pics/_DSC0554.xmp"))     // edit whose photo is gone
+    _ = try write([9], to: shoot.appendingPathComponent("pics/IMG_0001.photo-edit"))  // Photomator edit
     _ = try write([6], to: shoot.appendingPathComponent("Footage/FX3/C0001.MP4"))  // already sorted, same name
 
     let found = DriveScan.scan(shoot.deletingLastPathComponent().deletingLastPathComponent(),
                                volume: shoot.deletingLastPathComponent().deletingLastPathComponent(), driveID: "D")
-    expect(found.shoots.first?.unsorted == 6, "scan counts 6 loose media files incl. .xmp (not the pdf, not Footage/)")
+    expect(found.shoots.first?.unsorted == 7, "scan counts 7 loose media files incl. .xmp and .photo-edit (not the pdf, not Footage/)")
 
     var plan = ShootTidy.plan(shoot)
     expect(plan.cameras.map(\.name) == ["Eva", "FX3"], "cameras: Sony XML names FX3, unknown clip takes its folder name")
     let fx3 = plan.cameras.first { $0.name == "FX3" }!
     expect(fx3.bundles.map { "\($0.type)/\($0.origin)" } == ["MP4/Footage/FX3", "MP4/Aidan back", "XML/Aidan back"]
            && fx3.incoming == 2
-           && plan.destination(.photos)?.fileCount == 3 && plan.destination(.stay)?.bundles.map(\.type) == ["PDF"],
-           "bundles by type and folder: XML follows its clip, JPG and .xmp to Photos, PDF stays")
+           && plan.destination(.photos)?.fileCount == 4 && plan.destination(.stay)?.bundles.map(\.type) == ["PDF"],
+           "bundles by type and folder: XML follows its clip, JPG, .xmp and .photo-edit to Photos, PDF stays")
 
     // Edit like the sort page: add a folder, move Eva's clips into it, rename it, send the PDF to Project.
     let added = plan.addCameraFolder(named: "B-cam")
@@ -571,7 +572,7 @@ func sortsLooseFootageAndUndoes() throws {
     plan.remove(eva.id)
     if let i = plan.destinations.firstIndex(where: { $0.id == added }) { plan.destinations[i].name = "Eva cam" }
     plan.move(bundle: plan.destination(.stay)!.bundles[0].id, to: "project")
-    expect(plan.cameras.map(\.name) == ["FX3", "Eva cam"] && plan.fileCount == 7, "add, move, rename and remove folders")
+    expect(plan.cameras.map(\.name) == ["FX3", "Eva cam"] && plan.fileCount == 8, "add, move, rename and remove folders")
     try ShootTidy.apply(plan)
     let fm = FileManager.default
     expect(fm.fileExists(atPath: shoot.appendingPathComponent("Footage/FX3/C0001 (2).MP4").path)
@@ -581,7 +582,8 @@ func sortsLooseFootageAndUndoes() throws {
            && fm.fileExists(atPath: shoot.appendingPathComponent("Footage/Eva cam/clip.MOV").path)
            && fm.fileExists(atPath: shoot.appendingPathComponent("Photos/IMG_0001.JPG").path)
            && fm.fileExists(atPath: shoot.appendingPathComponent("Photos/IMG_0001.xmp").path)
-           && fm.fileExists(atPath: shoot.appendingPathComponent("Photos/_DSC0554.xmp").path), "everything lands in the layout")
+           && fm.fileExists(atPath: shoot.appendingPathComponent("Photos/_DSC0554.xmp").path)
+           && fm.fileExists(atPath: shoot.appendingPathComponent("Photos/IMG_0001.photo-edit").path), "everything lands in the layout")
     expect(!fm.fileExists(atPath: shoot.appendingPathComponent("Aidan back").path)
            && fm.fileExists(atPath: shoot.appendingPathComponent("Project/notes.pdf").path), "emptied folders tidied, pdf in Project")
     expect(ShootTidy.plan(shoot).isEmpty, "nothing left to sort")
@@ -594,7 +596,7 @@ func sortsLooseFootageAndUndoes() throws {
            && !ShootTidy.deleteEmptyCameraFolder(shoot.appendingPathComponent("Footage/FX3")), "deletes only empty folders")
 
     let undone = try ShootTidy.undoSort(shoot)
-    expect(undone.restored == 7 && undone.skipped == 0
+    expect(undone.restored == 8 && undone.skipped == 0
            && fm.fileExists(atPath: shoot.appendingPathComponent("Aidan back/C0001.MP4").path)
            && fm.fileExists(atPath: shoot.appendingPathComponent("Footage/FX3/C0001.MP4").path)
            && fm.fileExists(atPath: shoot.appendingPathComponent("notes.pdf").path)

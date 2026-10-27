@@ -42,9 +42,9 @@ public enum Card {
     static let metadataExtensions: Set<String> = [
         "xml", "cube", "srt", "cif", "cpf", "sif", "rmd", "sidecar", "ndf", "hprj", "aae",
     ]
-    /// Edit sidecars from Lightroom/Camera Raw (.xmp), RawTherapee, DxO, Capture One, ON1 —
-    /// they belong next to their photo, always in Photos.
-    static let photoEditExtensions: Set<String> = ["xmp", "pp3", "dop", "cos", "on1"]
+    /// Edit sidecars from Lightroom/Camera Raw (.xmp), RawTherapee, DxO, Capture One, ON1,
+    /// Photomator (.photo-edit) — they belong next to their photo, always in Photos.
+    static let photoEditExtensions: Set<String> = ["xmp", "pp3", "dop", "cos", "on1", "photo-edit"]
     static let mediaExtensions = videoExtensions
         .union(photoExtensions).union(thumbnailExtensions).union(metadataExtensions).union(photoEditExtensions)
     /// Card housekeeping the camera rebuilds itself: Sony's card database (.BIN/.IND, AVF_INFO),
