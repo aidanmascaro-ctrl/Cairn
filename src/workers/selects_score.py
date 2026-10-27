@@ -77,8 +77,12 @@ TARGET_METRICS: frozenset[str] = frozenset({"luma_target", "contrast_target"})
 TARGET_FALLOFF = 0.5  # a target metric reaches 0 this far from the aim point
 
 CAMERA_AXES: tuple[str, ...] = ("pan", "tilt", "zoom", "twist")
-# Per-sample magnitude that counts as "a full move" on each axis.
-CAMERA_AXIS_SCALE: dict[str, float] = {"pan": 0.04, "tilt": 0.04, "zoom": 0.02, "twist": 0.02}
+# Speed that counts as "a full move" on each axis, PER SECOND of footage (the unit
+# selects_metrics stores, so classes and filters don't change with sampling rate):
+# frame widths/heights per second, log-scale per second, radians per second.
+# selects_metrics derives camera_stillness from these same numbers, so
+# "static" below (summed share < 0.25) means camera_stillness > 0.75.
+CAMERA_AXIS_SCALE: dict[str, float] = {"pan": 0.15, "tilt": 0.15, "zoom": 0.15, "twist": 0.05}
 CAMERA_STATIC_THRESHOLD = 0.25
 CAMERA_DOMINANT_RATIO = 1.5
 
@@ -280,6 +284,12 @@ class ScoredFrames:
     forced: np.ndarray  # bool — True when an include-tier flag fired
     groups: dict[str, np.ndarray]  # per-group scores (NaN when the group contributes nothing)
     flags: np.ndarray  # int bitmask per sample
+
+
+def rating_key(start_sec: float, end_sec: float) -> str:
+    """Identity of a time range for ratings. Only Python formats it: every segment
+    carries its key to the UI, so JS never has to reproduce Python's rounding."""
+    return f"{start_sec:.2f}-{end_sec:.2f}"
 
 
 def _frames_array(frames: list[list[float]]) -> np.ndarray:
@@ -521,6 +531,7 @@ def _segment_record(
         # left behind). Anywhere else, never past the clip.
         end_sec = duration_sec if fe == len(scored.t) else min(end_sec, duration_sec)
     return {
+        "key": rating_key(round(start_sec, 4), round(end_sec, 4)),
         "start_sec": round(start_sec, 4),
         "end_sec": round(end_sec, 4),
         "duration_sec": round(end_sec - start_sec, 4),

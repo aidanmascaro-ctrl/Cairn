@@ -339,6 +339,15 @@ def _append(mp: Any, pieces: list[Piece], pool: dict[str, Any], start: int) -> l
     return list(mp.AppendToTimeline(infos) or []) if infos else []
 
 
+def _placed_starts(timeline: Any, start: int) -> dict[int, set[int]]:
+    """Video track index → record frames (from timeline start) of the items on it."""
+    out: dict[int, set[int]] = {}
+    for i in range(1, int(timeline.GetTrackCount("video") or 0) + 1):
+        items = timeline.GetItemListInTrack("video", i) or []
+        out[i] = {int(it.GetStart()) - start for it in items}
+    return out
+
+
 def _readback(timeline: Any) -> dict[str, int]:
     out: dict[str, int] = {}
     for kind, prefix in (("video", "V"), ("audio", "A")):
@@ -420,7 +429,7 @@ def build_selects_timeline(
             "clip_markers_added": result["clip_markers_added"],
             "tracks": result["tracks"],
             "missing_paths": missing,
-            "warnings": warnings + result["warnings"],
+            "warnings": list(scored.get("warnings", [])) + warnings + result["warnings"],
             "error": None,
         }
     finally:
@@ -460,14 +469,24 @@ def _fill_timeline(
         if len(got) < len(wanted):
             warnings.append(f"Resolve placed {len(got)} of {len(wanted)} pieces on V{track}.")
         items.extend(got)
+    # Judge the build by what is on the timeline, not by what was asked for.
+    placed = _placed_starts(timeline, start)
+    if not any(placed.values()):
+        raise RuntimeError("Resolve didn't place any clips on the timeline")
     linked = _link_audio(timeline, items)
     if linked < len(items):
         warnings.append(f"{len(items) - linked} clip(s) aren't linked to their own audio.")
 
-    select_pieces = [p for p in pieces if p.is_select and p.segment is not None]
+    planned_selects = [p for p in pieces if p.is_select and p.segment is not None]
     planned = sum(len(c["segments"]) for c in present)
-    if len(select_pieces) < planned:
-        warnings.append(f"{planned - len(select_pieces)} select(s) were too short to place.")
+    if len(planned_selects) < planned:
+        warnings.append(f"{planned - len(planned_selects)} select(s) were too short to place.")
+    # Markers only for selects that actually landed, so none point at an empty gap.
+    select_pieces = [p for p in planned_selects if p.record in placed.get(p.track, set())]
+    if len(select_pieces) < len(planned_selects):
+        warnings.append(
+            f"{len(planned_selects) - len(select_pieces)} select(s) didn't land on the timeline."
+        )
     names = {str(c["file"]): str(c["name"]) for c in present}
     markers_added = (
         _add_timeline_markers(timeline, select_pieces, names, warnings) if include_markers else 0
@@ -485,7 +504,7 @@ def _fill_timeline(
     return {
         "fps": tl_fps,
         "select_count": len(select_pieces),
-        "piece_count": len(pieces),
+        "piece_count": sum(len(v) for v in placed.values()),
         "linked_count": linked,
         "markers_added": markers_added,
         "clip_markers_added": clip_added,

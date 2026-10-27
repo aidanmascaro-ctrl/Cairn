@@ -18,7 +18,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from selects_score import COLUMNS, FLAG_BITS
+from selects_score import CAMERA_AXIS_SCALE, COLUMNS, FLAG_BITS
 
 # ── Calibration constants ──
 # Tuned 2026-10-27 against Cutdown's All-Rounder selects on 40 ACME clips (Sony
@@ -40,9 +40,8 @@ LETTERBOX_MAX_FRACTION = 0.25
 
 MOTION_WIDTH = 480  # long edge for optical flow
 MAX_FEATURES = 300
-PAN_FULL = 0.15  # frame widths per second that read as "fully moving"
-ZOOM_FULL = 0.15  # log-scale per second
-TWIST_FULL = 0.05  # radians per second
+# "Fully moving" speeds come from selects_score.CAMERA_AXIS_SCALE (per second), so
+# camera_stillness and the camera classes/filter can never disagree on units.
 SUBJECT_DIFF_FULL = 0.08
 
 WINDOW = 2  # temporal window = ±2 samples
@@ -214,7 +213,10 @@ def measure_motion(prev: np.ndarray, cur: np.ndarray, rate: float) -> dict[str, 
         warped = cv2.warpAffine(a, matrix, (w, h), borderMode=cv2.BORDER_REPLICATE)
 
     camera_amount = (
-        (abs(pan) + abs(tilt)) / PAN_FULL + abs(zoom) / ZOOM_FULL + abs(twist) / TWIST_FULL
+        abs(pan) / CAMERA_AXIS_SCALE["pan"]
+        + abs(tilt) / CAMERA_AXIS_SCALE["tilt"]
+        + abs(zoom) / CAMERA_AXIS_SCALE["zoom"]
+        + abs(twist) / CAMERA_AXIS_SCALE["twist"]
     )
     margin_y, margin_x = h // 10, w // 10
     core_diff = float(

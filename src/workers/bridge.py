@@ -167,15 +167,27 @@ def _shoot(payload: dict[str, Any]) -> str:
     return path
 
 
-def _settings(payload: dict[str, Any], shoot: str) -> selects_score.SelectsSettings:
-    """Explicit settings win, then a preset id, then whatever the shoot last used."""
+def _explicit_settings(payload: dict[str, Any]) -> selects_score.SelectsSettings | None:
+    """Settings or a preset id from the caller, or None to use what the shoot last used."""
     raw = payload.get("settings")
     if isinstance(raw, dict):
         return selects_score.settings_from_dict(raw)
     preset_id = payload.get("preset_id")
     if isinstance(preset_id, str) and preset_id:
         return selects_learn.resolve_preset(preset_id)
-    return selects_worker.load_settings(shoot)
+    return None
+
+
+def _settings(
+    payload: dict[str, Any], shoot: str
+) -> tuple[selects_score.SelectsSettings, list[str]]:
+    """Explicit settings win, then a preset, then the shoot's saved tuning — whose
+    unreadable-file warning is returned rather than dropped."""
+    explicit = _explicit_settings(payload)
+    if explicit is not None:
+        return explicit, []
+    saved, warning = selects_worker.load_settings_with_warning(shoot)
+    return saved, [warning] if warning else []
 
 
 def handle_selects_presets(msg: dict[str, Any]) -> dict[str, Any]:
@@ -189,7 +201,8 @@ def handle_selects_presets(msg: dict[str, Any]) -> dict[str, Any]:
 def handle_selects_rescore(msg: dict[str, Any]) -> dict[str, Any]:
     payload = msg.get("payload", {})
     shoot = _shoot(payload)
-    result = selects_worker.rescore(shoot, _settings(payload, shoot), persist=True)
+    # None → rescore loads the saved tuning itself and reports if it was unreadable.
+    result = selects_worker.rescore(shoot, _explicit_settings(payload), persist=True)
     return {"id": msg["id"], "type": "selects_rescore_result", **result}
 
 
@@ -224,14 +237,16 @@ def handle_selects_rate(msg: dict[str, Any]) -> dict[str, Any]:
 def handle_selects_learn_context(msg: dict[str, Any]) -> dict[str, Any]:
     payload = msg.get("payload", {})
     shoot = _shoot(payload)
-    ctx = selects_learn.learn_context(shoot, _settings(payload, shoot))
+    settings, warnings = _settings(payload, shoot)
+    ctx = {**selects_learn.learn_context(shoot, settings), "warnings": warnings}
     return {"id": msg["id"], "type": "selects_learn_context_result", **ctx}
 
 
 def handle_selects_evaluate(msg: dict[str, Any]) -> dict[str, Any]:
     payload = msg.get("payload", {})
     shoot = _shoot(payload)
-    result = selects_learn.evaluate(shoot, _settings(payload, shoot))
+    settings, warnings = _settings(payload, shoot)
+    result = {**selects_learn.evaluate(shoot, settings), "warnings": warnings}
     return {"id": msg["id"], "type": "selects_evaluate_result", **result}
 
 
@@ -257,7 +272,7 @@ def handle_selects_build_timeline(msg: dict[str, Any]) -> dict[str, Any]:
     name = payload.get("name")
     result = selects_timeline.build_selects_timeline(
         shoot,
-        _settings(payload, shoot),
+        _explicit_settings(payload),  # None → the build's rescore reports saved-tuning issues
         layout=str(payload.get("layout", "context")),
         order=str(payload.get("order", "timeline")),
         include_markers=bool(payload.get("include_markers", True)),

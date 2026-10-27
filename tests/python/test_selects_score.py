@@ -363,8 +363,8 @@ class TestSegments:
         (-0.05, 0.0, 0.0, 0.0, "pan_left"),
         (0.0, 0.05, 0.0, 0.0, "tilt_down"),
         (0.0, -0.05, 0.0, 0.0, "tilt_up"),
-        (0.0, 0.0, 0.03, 0.0, "zoom_in"),
-        (0.0, 0.0, -0.03, 0.0, "zoom_out"),
+        (0.0, 0.0, 0.1, 0.0, "zoom_in"),
+        (0.0, 0.0, -0.1, 0.0, "zoom_out"),
         (0.0, 0.0, 0.0, 0.03, "twist_cw"),
         (0.0, 0.0, 0.0, -0.03, "twist_ccw"),
         (0.04, 0.04, 0.0, 0.0, "mixed"),
@@ -372,6 +372,34 @@ class TestSegments:
 )
 def test_camera_class(pan: float, tilt: float, zoom: float, twist: float, expected: str) -> None:
     assert ss.camera_class(pan, tilt, zoom, twist) == expected
+
+
+def test_camera_axes_are_per_second() -> None:
+    # Units are per second of footage: slow handheld drift is static, a gentle
+    # pan across a third of the frame in ten seconds is still a pan.
+    assert ss.camera_class(0.01, 0.005, 0.0, 0.0) == "static"
+    assert ss.camera_class(0.05, 0.0, 0.0, 0.0) == "pan_right"
+
+
+def test_static_class_agrees_with_measured_stillness() -> None:
+    import selects_metrics
+
+    assert not hasattr(selects_metrics, "PAN_FULL")
+    # camera_stillness = 1 - sum(|axis| / scale); "static" is that sum < threshold.
+    pan = ss.CAMERA_AXIS_SCALE["pan"] * (ss.CAMERA_STATIC_THRESHOLD - 0.01)
+    assert ss.camera_class(pan, 0.0, 0.0, 0.0) == "static"
+    pan = ss.CAMERA_AXIS_SCALE["pan"] * (ss.CAMERA_STATIC_THRESHOLD + 0.01)
+    assert ss.camera_class(pan, 0.0, 0.0, 0.0) == "pan_right"
+
+
+def test_every_segment_carries_its_rating_key() -> None:
+    # Times on 1/16 s, where Python and JS rounding of .2f used to disagree.
+    frames = [frame(i / 16.0) for i in range(80)]
+    seg = ss.score_clip(
+        {"frames": frames, "sampling_rate": 16.0, "duration_sec": 5.0},
+        ss.settings_from_dict({"handles_samples": 0}),
+    )["segments"][0]
+    assert seg["key"] == ss.rating_key(seg["start_sec"], seg["end_sec"])
 
 
 def test_marker_bands_are_tertiles() -> None:

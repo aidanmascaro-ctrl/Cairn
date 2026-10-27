@@ -324,11 +324,13 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("selects_evaluate_result"),
+    warnings: z.array(z.string()).optional(),
     ...EvaluationSchema.shape,
   }),
   z.object({
     id: z.string(),
     type: z.literal("selects_learn_context_result"),
+    warnings: z.array(z.string()).optional(),
     ready: z.boolean(),
     reason: z.string().nullable(),
     examples: z.array(z.record(z.string(), z.unknown())),

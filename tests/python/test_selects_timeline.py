@@ -240,6 +240,7 @@ class FakeMediaPool:
         self.appends: list[list[dict[str, Any]]] = []
         self.auto_link = False  # Resolve 21 links video+audio of a clipInfo append itself
         self.drop_last = False  # simulate Resolve placing fewer pieces than asked
+        self.drop_all = False  # simulate Resolve placing nothing
         self.explode = False  # simulate a Resolve call blowing up mid-build
 
     def GetRootFolder(self) -> FakeFolder:  # noqa: N802
@@ -260,11 +261,13 @@ class FakeMediaPool:
             raise RuntimeError("Resolve went away")
         if self.drop_last:
             infos = infos[:-1]
+        if self.drop_all:
+            return []
         tl = self.project.current or self.project.timelines[-1]
         out: list[FakeItem] = []
         for info in infos:
             dur = info["endFrame"] - info["startFrame"]
-            rec = info["recordFrame"] - tl.GetStartFrame()
+            rec = info["recordFrame"]  # Resolve reports absolute timeline frames
             pair: list[FakeItem] = []
             for kind in ("video", "audio"):
                 item = FakeItem(info["mediaPoolItem"], kind, info["trackIndex"], rec, dur)
@@ -521,3 +524,49 @@ def test_norm_path_follows_symlinks(tmp_path: Path) -> None:
     link = tmp_path / "link.mp4"
     link.symlink_to(real)
     assert st.norm_path(str(link)) == st.norm_path(str(real))
+
+
+class TestBuildReadBack:
+    def test_nothing_placed_is_a_failure_not_success(
+        self, monkeypatch: pytest.MonkeyPatch, scored: Any, tmp_path: Path
+    ) -> None:
+        pool = [FakeMPI(c["file"]) for c in scored]
+        project = FakeProject(pool)
+        project.mp.drop_all = True
+        _install(monkeypatch, project)
+        out = st.build_selects_timeline(tmp_path / "Shoot")
+        assert out["ok"] is False
+        assert "didn't place any clips" in out["error"]
+        assert project.timelines == []  # empty timeline removed
+        assert all(not mpi.markers for mpi in pool)  # no markers pointing at nothing
+
+    def test_counts_and_markers_follow_what_landed(
+        self, monkeypatch: pytest.MonkeyPatch, scored: Any, tmp_path: Path
+    ) -> None:
+        project = FakeProject([FakeMPI(c["file"]) for c in scored])
+        project.mp.drop_last = True  # last V1 piece and last select never land
+        _install(monkeypatch, project)
+        out = st.build_selects_timeline(tmp_path / "Shoot")
+        assert out["ok"] is True
+        assert out["select_count"] == 2  # read back, not the 3 planned
+        assert out["markers_added"] == 2
+        assert out["piece_count"] == out["tracks"]["V1"] + out["tracks"]["V2"]
+        assert any("didn't land" in w for w in out["warnings"])
+
+    def test_build_reports_unreadable_saved_tuning(
+        self, monkeypatch: pytest.MonkeyPatch, scored: Any, tmp_path: Path
+    ) -> None:
+        clips = scored
+        monkeypatch.setattr(
+            selects,
+            "rescore",
+            lambda folder, settings=None, persist=True: {
+                "clips": clips,
+                "summary": {},
+                "settings": {},
+                "warnings": ["Saved tuning for this shoot couldn't be read"],
+            },
+        )
+        _install(monkeypatch, FakeProject([FakeMPI(c["file"]) for c in clips]))
+        out = st.build_selects_timeline(tmp_path / "Shoot")
+        assert out["warnings"][0].startswith("Saved tuning")

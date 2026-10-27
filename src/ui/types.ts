@@ -310,6 +310,8 @@ export interface SelectsPreset {
 }
 
 export interface SelectSegment {
+  /** Rating identity, formatted by Python only — never rebuilt in JS (rounding differs). */
+  key: string;
   start_sec: number;
   end_sec: number;
   duration_sec: number;

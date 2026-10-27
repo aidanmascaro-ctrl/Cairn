@@ -230,3 +230,25 @@ def test_preset_id_only_accepts_short_slugs(value: Any) -> None:
 
 def test_preset_id_slug_passes() -> None:
     assert ss.settings_from_dict({"preset_id": "user-my-taste"}).preset_id == "user-my-taste"
+
+
+def test_bridge_keeps_the_unreadable_tuning_warning(tmp_path: Path) -> None:
+    import bridge
+
+    (tmp_path / "01_VIDEOS" / "A_CAM").mkdir(parents=True)
+    path = selects.settings_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("{broken")
+    msg = {"id": "1", "payload": {"path": str(tmp_path)}}
+    rescored = bridge.handle_selects_rescore(msg)
+    assert any("couldn't be read" in w for w in rescored["warnings"])
+
+    path.write_text("[]")  # damage it again for the learn path
+    ctx = bridge.handle_selects_learn_context(msg)
+    assert any("couldn't be read" in w for w in ctx["warnings"])
+
+    # explicit settings from the panel never trigger it
+    ok = bridge.handle_selects_rescore(
+        {"id": "2", "payload": {"path": str(tmp_path), "settings": {"dip_sec": 1}}}
+    )
+    assert ok["warnings"] == []

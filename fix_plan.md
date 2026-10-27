@@ -46,7 +46,7 @@ Each entry:
 
 ### Selects: code review findings (2026-10-27, pre-commit review)
 
-- **Status:** open
+- **Status:** MEDIUM items resolved 2026-10-27; LOW items open
 - **Opened:** 2026-10-27
 - **Area:** `src/workers/selects*.py`, `src/ui/selects/`, `src/workers/bridge.py`
 - **Symptom / gap:** found by an independent review before the first Selects commit; none fixed yet.
@@ -55,7 +55,12 @@ Each entry:
   - MEDIUM — corrupt saved-tuning warning is dropped on the live path: `bridge.py` `_settings()` uses `load_settings()` and discards the warning from `load_settings_with_warning()`.
   - MEDIUM — rating keys disagree between Python `f"{x:.2f}"` and JS `toFixed(2)` on exact .125/.375/.625/.875 ties, so those segments show as unrated in `SelectsClipList`.
   - LOW — `specs/selects.md` §2 table still lists the old formulas/thresholds; fps only warned, not set, when the project already has timelines; video-only clips raise a false "not linked to audio" warning; a failed build leaves its clip markers (and an empty timeline if `_create_timeline` throws); fixed 180 s build timeout in `main.js`.
-- **Next step:** fix the four MEDIUM items before relying on Selects, starting with the build-success and motion-unit ones.
+- **Resolved (MEDIUM):**
+  - Build success now comes from the read-back: if Resolve places no video the build fails and the empty timeline is removed; `select_count` / `piece_count` are counted on the timeline, and markers go only on selects that landed.
+  - Camera axes use one per-second `CAMERA_AXIS_SCALE` in `selects_score.py`, which `selects_metrics` now imports for `camera_stillness` — the units can't drift apart again. Stored measurements are unchanged (same numbers), so nothing needs re-analysing.
+  - `bridge.py` passes no settings when the panel sends none, so `rescore` loads the saved tuning itself and returns its warning; builds, learn context and evaluate carry it too.
+  - Every segment carries a `key` made by Python (`selects_score.rating_key`); the UI uses it instead of formatting with `toFixed`.
+- **Next step:** the LOW items above.
 
 ### Review notes outside Selects (2026-10-27, LOW)
 

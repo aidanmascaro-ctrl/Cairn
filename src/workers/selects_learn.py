@@ -54,8 +54,7 @@ SUMMARY_METRICS = (
 # ── Ratings ──────────────────────────────────────────────────────────────────
 
 
-def rating_key(start_sec: float, end_sec: float) -> str:
-    return f"{start_sec:.2f}-{end_sec:.2f}"
+rating_key = ss.rating_key  # one implementation, shared with the segments the UI shows
 
 
 def rate(

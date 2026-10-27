@@ -49,7 +49,8 @@ sampling rate is skipped. A different sampling rate re-analyses.
 Every metric is `0.0–1.0`, oriented so **1.0 is the "good" end** of the Cutdown bar
 (Sharp, Detailed, Locked, Flexible, Stable, Still, Steady, Smooth). `luma` and `contrast`
 are fixed scales with no good end. `pan`/`tilt`/`zoom`/`twist` are signed camera-motion
-estimates per sample (fraction of frame width per sample, log-scale ratio, radians).
+speeds **per second of footage** (frame widths or heights per second, log-scale per second,
+radians per second), so classes and filters mean the same thing at any sampling rate.
 `flags` is a bitmask: `1 clipping, 2 duplicate, 4 solid_color, 8 hard_cut,
 16 motion_blur, 32 shaky, 64 low_light`.
 
@@ -104,14 +105,14 @@ Source media is opened read-only; nothing is written next to it.
 Letterbox rows/columns (mean < 0.02 at the edges) are cropped first.
 
 | Metric              | Measure                                                                                                                                                                                                                                 | Normalisation             |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | --- | ---- | ---------- | ---- | -------- | ----- | -------- | --- |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | `sharpness`         | variance of the Laplacian per cell of a 6×6 grid; take the **max** cell so an in-focus subject on a soft background scores well; cells with mean luma < 0.08 are down-weighted (sensor noise ≠ detail)                                  | `1 - exp(-v / 0.0025)`    |
 | `detail`            | fraction of pixels whose Sobel magnitude exceeds 0.08                                                                                                                                                                                   | `min(1, frac / 0.15)`     |
 | `headroom`          | `1 - min(1, 8 × (crushed + blown))` where crushed = frac < 1/255, blown = frac > 254/255                                                                                                                                                | —                         |
 | `luma`              | mean                                                                                                                                                                                                                                    | —                         |
 | `contrast`          | standard deviation                                                                                                                                                                                                                      | `min(1, std / 0.3)`       |
 | camera motion       | `cv2.estimateAffinePartial2D` on `goodFeaturesToTrack` + Lucas-Kanade between consecutive samples → translation (`pan`, `tilt` as fraction of width/height), `zoom = log(scale)`, `twist` (radians), `motion_confidence` = inlier ratio | —                         |
-| `camera_stillness`  | `1 - min(1, (                                                                                                                                                                                                                           | pan                       | +   | tilt | ) / 0.08 + | zoom | / 0.05 + | twist | / 0.03)` | —   |
+| `camera_stillness`  | `1 - min(1, Σ abs(axis) / CAMERA_AXIS_SCALE[axis])` with the per-second scale in `selects_score.py` (pan 0.15, tilt 0.15 frame/s; zoom 0.15 log/s; twist 0.05 rad/s), the same numbers the camera classes and filter use                | —                         |
 | `subject_stillness` | previous sample warped by the camera transform, mean abs diff vs current                                                                                                                                                                | `1 - min(1, diff / 0.08)` |
 
 Temporal metrics, computed over a ±2-sample window once all frames are in:

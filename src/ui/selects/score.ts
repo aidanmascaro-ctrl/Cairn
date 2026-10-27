@@ -71,8 +71,10 @@ export const SAMPLING_RATES: readonly { value: number; label: string }[] = [
   { value: 0, label: "Every frame" },
 ];
 
-export function ratingKey(seg: Pick<SelectSegment, "start_sec" | "end_sec">): string {
-  return `${seg.start_sec.toFixed(2)}-${seg.end_sec.toFixed(2)}`;
+export function ratingKey(seg: Pick<SelectSegment, "key">): string {
+  // Python's f"{x:.2f}" and JS toFixed(2) round exact ties (.125, .375 …) differently,
+  // so the key always comes from the worker, never from formatting here.
+  return seg.key;
 }
 
 export function fileName(path: string): string {
