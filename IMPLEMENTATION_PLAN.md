@@ -458,9 +458,33 @@ See `specs/sidebar.md` for full detail.
 
 ---
 
+## Session 12: Stage 5 — Selects (Cutdown recreated inside the plugin)
+
+Recreate the Cutdown footage-scoring workflow (`specs/selects.md`) as a Cairn stage:
+analyse once, tune instantly, build the selects timeline in Resolve directly, and learn the
+editor's taste with Claude.
+
+- [x] `specs/selects.md` — measurements, scoring rules, presets, timeline layout, learning
+- [x] `selects_score.py` + `selects_presets.py` — pure scoring, segmentation, near misses, presets
+- [x] `selects_metrics.py` — focus / exposure / motion measurements, calibrated against Cutdown
+- [x] `selects.py` — ffmpeg sampler, threaded analysis, sidecar `selects` block, rescore cache
+- [x] `selects_timeline.py` — context / selects-only layouts, markers, colour standard, read-back
+- [x] `selects_learn.py` + `src/orchestrator/selects-learn.js` + prompt — ratings → Claude → replay check
+- [x] Bridge handlers, Zod schemas, IPC, preload, types
+- [x] `src/ui/selects/` panel (tuning, chart, clip strips with ratings, learn, build)
+- [x] Installer + PyInstaller + electron-builder + build-mac ship the new files and SDK
+- [x] Sensors green: pytest (232), vitest (22), typecheck, svelte-check, lint, ruff, pyrefly
+- [x] Live Resolve build verified in a scratch project (both layouts, links, markers, vertical colour)
+- [ ] Live Claude learning call (needs a valid Anthropic key in Settings)
+- [ ] Try the panel inside Resolve (restart Resolve to load the new UI)
+
+---
+
 ## Carry-Forward / Backlog
 
 ### Active (post scope-reset)
+
+- Stage 5 (selects — Cutdown-style scoring + taste learning) ✅ built 2026-10-27; live Claude call pending a valid key
 
 - Stage 1 (ingest — folder organise + Resolve bin import) ✅ shipped
 - Stage 2 (classify — vision KNN: face_ratio + motion_score) ✅ shipped

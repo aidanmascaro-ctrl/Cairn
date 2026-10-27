@@ -60,14 +60,19 @@ cp "$PROJECT_ROOT/manifest.xml"                                 "$STAGE/Cairn/ma
 cp "$PROJECT_ROOT/package.json"                                 "$STAGE/Cairn/package.json"
 cp "$PROJECT_ROOT/src/orchestrator/main.js"                     "$STAGE/Cairn/src/orchestrator/main.js"
 cp "$PROJECT_ROOT/src/orchestrator/preload.js"                  "$STAGE/Cairn/src/orchestrator/preload.js"
+cp "$PROJECT_ROOT/src/orchestrator/selects-learn.js"            "$STAGE/Cairn/src/orchestrator/selects-learn.js"
+cp -R "$PROJECT_ROOT/src/orchestrator/prompts"                  "$STAGE/Cairn/src/orchestrator/prompts"
 cp "$PROJECT_ROOT/src/orchestrator/WorkflowIntegration.node"    "$STAGE/Cairn/src/orchestrator/WorkflowIntegration.node"
 cp -R "$PROJECT_ROOT/dist"                                      "$STAGE/Cairn/dist"
 
-# Minimal node_modules — production deps only (chokidar, zod)
+# Minimal node_modules — production deps only (chokidar, zod, and the
+# Anthropic SDK with its runtime dependency closure for taste learning)
 mkdir -p "$STAGE/Cairn/node_modules"
-for mod in chokidar zod; do
-  [[ -d "$PROJECT_ROOT/node_modules/$mod" ]] && \
+for mod in chokidar zod @anthropic-ai/sdk @opentelemetry/api standardwebhooks @stablelib/base64 fast-sha256 json-schema-to-ts @babel/runtime ts-algebra; do
+  if [[ -d "$PROJECT_ROOT/node_modules/$mod" ]]; then
+    mkdir -p "$(dirname "$STAGE/Cairn/node_modules/$mod")"
     cp -R "$PROJECT_ROOT/node_modules/$mod" "$STAGE/Cairn/node_modules/$mod"
+  fi
 done
 
 # PyInstaller workers binary → resources/workers

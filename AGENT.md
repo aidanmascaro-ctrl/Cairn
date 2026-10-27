@@ -70,3 +70,11 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 _Add here when a command behaves differently on macOS vs Windows, or when a Resolve API returns unexpected values on one OS._
 
 - **Resolve Developer examples path** is `Library/Application Support/Blackmagic Design/...` at the system level on macOS. Windows equivalent (per Blackmagic docs) is `%ProgramData%\Blackmagic Design\DaVinci Resolve\Support\Workflow Integration Plugins\` — verify on first Windows bring-up.
+
+## Selects stage (Session 12)
+
+- **Decode is the bottleneck.** Sony XAVC 4:2:2 10-bit H.264 can't use VideoToolbox; software decode runs about 4.5× real time and already uses ~11 cores per clip, so `selects.DEFAULT_WORKERS = 2`.
+- **AppendToTimeline (Resolve 21.1, clipInfo form)** returns only video items, routes audio to the same track index, and links the pair itself. `SetClipsLinked` then returns False. Verify links with `GetLinkedItems`, never the return value.
+- **Calibrating metrics:** decode once to a frame cache (npz), then sweep constants over cached frames. Any `ProcessPoolExecutor` script needs an `if __name__ == "__main__":` guard on macOS (spawn re-imports main).
+- **Live Resolve tests:** save the user's project, `CreateProject("_cairn_selects_test")`, test, `CloseProject`, `LoadProject(<user project>)`, `DeleteProject`. Leaves the user where they were.
+- **Svelte 4 templates** can't contain TypeScript (`as` casts, `as const`). Put typed helpers in `<script>`.

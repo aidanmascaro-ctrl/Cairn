@@ -11,6 +11,7 @@
   import DropZone from "./DropZone.svelte";
   import ClassifyPanel from "./ClassifyPanel.svelte";
   import TimelinePanel from "./TimelinePanel.svelte";
+  import SelectsPanel from "./selects/SelectsPanel.svelte";
 
   // `window.cairn` is exposed by src/orchestrator/preload.js via contextBridge.
   const cairn: CairnBridge | undefined = (window as unknown as { cairn?: CairnBridge }).cairn;
@@ -136,6 +137,8 @@
   />
 
   <TimelinePanel {ingestFolder} {pendingAmbiguous} />
+
+  <SelectsPanel {ingestFolder} />
 
   <Settings />
 

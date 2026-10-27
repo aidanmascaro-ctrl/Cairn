@@ -105,6 +105,8 @@ cp "$PROJECT_ROOT/package.json" "$INSTALL_PATH/package.json"
 # Electron main + preload
 link_or_copy "$PROJECT_ROOT/src/orchestrator/main.js" "$INSTALL_PATH/src/orchestrator/main.js"
 link_or_copy "$PROJECT_ROOT/src/orchestrator/preload.js" "$INSTALL_PATH/src/orchestrator/preload.js"
+link_or_copy "$PROJECT_ROOT/src/orchestrator/selects-learn.js" "$INSTALL_PATH/src/orchestrator/selects-learn.js"
+link_or_copy "$PROJECT_ROOT/src/orchestrator/prompts" "$INSTALL_PATH/src/orchestrator/prompts"
 
 # Python workers (bridge.py, ingest.py, resolve_import.py, sidecar.py, resolve_api.py)
 # Symlinked so source edits to .py files are live without reinstalling.

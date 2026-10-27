@@ -43,6 +43,13 @@ a = Analysis(
         "sidecar",
         "resolve_api",
         "resolve_import",
+        "selects",
+        "selects_learn",
+        "selects_metrics",
+        "selects_presets",
+        "selects_score",
+        "selects_timeline",
+        "timeline",
         # silero-vad 6+ runtime (ONNX — no torch needed)
         "onnxruntime",
         "onnxruntime.capi",

@@ -19,6 +19,7 @@ const { spawn } = require("node:child_process");
 const { createInterface } = require("node:readline");
 const { randomUUID } = require("node:crypto");
 const https = require("node:https");
+const selectsLearn = require("./selects-learn.js");
 
 // ── Inline Python bridge (lightweight — for IPC handlers only) ───────────────
 // The full typed PythonBridge class lives in src/orchestrator/python-bridge.ts
@@ -112,6 +113,8 @@ function ensurePythonWorker() {
     try {
       msg = JSON.parse(trimmed);
     } catch {
+      // A reply that isn't JSON would otherwise surface only as a vague timeout.
+      process.stderr.write(`[bridge.py] unparseable reply: ${trimmed.slice(0, 300)}\n`);
       return;
     }
     const pending = pythonPending.get(msg.id);
@@ -168,6 +171,31 @@ function callPython(msg, opts = {}) {
     pythonWorker.stdin.write(JSON.stringify({ ...msg, id }) + "\n");
   });
 }
+
+/**
+ * Bridge call for Stage 5 handlers: rejects on a `{type:"error"}` reply.
+ * @param {object} msg
+ * @param {number} [timeoutMs]
+ * @param {(e: object) => void} [onProgress]
+ */
+async function selectsCall(msg, timeoutMs = 30_000, onProgress) {
+  // The worker handles one request at a time. During an analysis anything else
+  // would queue for minutes, time out here, then still run later — refuse it now.
+  if (selectsAnalysing && msg.type !== "selects_analyse") {
+    throw new Error("Selects is still analysing footage. Wait for it to finish, then try again.");
+  }
+  const opts = onProgress ? { timeoutMs, onProgress } : { timeoutMs };
+  const result = await callPython(msg, opts);
+  if (!result || result.type === "error") {
+    throw new Error(result?.message ?? `${msg.type} returned nothing`);
+  }
+  return result;
+}
+
+const SELECTS_ANALYSE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+/** Bounded so a stuck request can't leave "Claude is thinking…" up for 20+ minutes. */
+const CLAUDE_TIMEOUT_MS = 180_000;
+let selectsAnalysing = false;
 
 // WorkflowIntegration.node is a native Node addon shipped by Resolve.
 // In development we copy it alongside this file via packaging/install-dev-plugin.sh.
@@ -796,6 +824,68 @@ function registerIpc() {
     }
 
     return result;
+  });
+
+  // ── Stage 5: Selects ───────────────────────────────────────────────────────
+  // Every call goes through the single bridge worker (Taste Invariant #3).
+  // The inline bridge resolves `{type:"error"}` instead of rejecting, so
+  // selectsCall turns it into a thrown error the renderer can show.
+  ipcMain.handle("cairn:selects:presets", () => selectsCall({ type: "selects_presets" }));
+
+  ipcMain.handle("cairn:selects:rescore", (_event, payload) =>
+    selectsCall({ type: "selects_rescore", payload }, 60_000),
+  );
+
+  ipcMain.handle("cairn:selects:rate", (_event, payload) =>
+    selectsCall({ type: "selects_rate", payload }),
+  );
+
+  ipcMain.handle("cairn:selects:savePreset", (_event, payload) =>
+    selectsCall({ type: "selects_save_preset", payload }),
+  );
+
+  ipcMain.handle("cairn:selects:build", (_event, payload) =>
+    selectsCall({ type: "selects_build_timeline", payload }, 180_000),
+  );
+
+  ipcMain.handle("cairn:selects:analyse", async (event, payload) => {
+    const sendProgress = (obj) => {
+      if (!event.sender.isDestroyed()) event.sender.send("cairn:selects:progress", obj);
+    };
+    // Decoding is the slow part (~5x real time for 4K long-GOP). Progress streams
+    // the whole way, so this cap only catches a genuine hang.
+    if (selectsAnalysing) {
+      throw new Error("An analysis is already running.");
+    }
+    selectsAnalysing = true;
+    try {
+      return await selectsCall(
+        { type: "selects_analyse", payload },
+        SELECTS_ANALYSE_TIMEOUT_MS,
+        sendProgress,
+      );
+    } finally {
+      selectsAnalysing = false;
+    }
+  });
+
+  ipcMain.handle("cairn:selects:learn", async (_event, payload) => {
+    if (typeof payload?.path !== "string" || !payload.path) {
+      return { ok: false, error: "No shoot folder was given." };
+    }
+    const apiKey = readStoredKeys()["ANTHROPIC_API_KEY"] || process.env["ANTHROPIC_API_KEY"];
+    if (!apiKey) {
+      return { ok: false, error: "Add your Anthropic API key in Settings to use taste learning." };
+    }
+    let Anthropic;
+    try {
+      Anthropic = selectsLearn.loadSdk();
+    } catch (err) {
+      return { ok: false, error: `Anthropic SDK missing from the plugin bundle: ${err.message}` };
+    }
+    const client = new Anthropic({ apiKey, timeout: CLAUDE_TIMEOUT_MS, maxRetries: 1 });
+    const python = (msg) => selectsCall(msg, 60_000);
+    return selectsLearn.learnTaste({ python, client, Anthropic }, payload);
   });
 }
 

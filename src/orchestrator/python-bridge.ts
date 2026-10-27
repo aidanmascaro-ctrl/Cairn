@@ -16,6 +16,22 @@ import { z } from "zod";
 // ── Message schemas ──────────────────────────────────────────────────────────
 
 const ClassifyLabelSchema = z.enum(["A-ROLL", "B-ROLL", "AMBIGUOUS", "UNKNOWN"]);
+const SelectRatingSchema = z.enum(["keep", "reject"]);
+const SelectsSettingsPayloadSchema = z.object({
+  path: z.string(),
+  settings: z.record(z.string(), z.unknown()).optional(),
+  preset_id: z.string().optional(),
+});
+const EvaluationSchema = z.object({
+  total: z.number(),
+  correct: z.number(),
+  accuracy: z.number(),
+  keeps_kept: z.number(),
+  keeps_total: z.number(),
+  rejects_dropped: z.number(),
+  rejects_total: z.number(),
+  details: z.array(z.record(z.string(), z.unknown())),
+});
 
 export const OutboundMessageSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("echo"), payload: z.string() }),
@@ -53,6 +69,69 @@ export const OutboundMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("build_timeline"),
     payload: z.object({
       path: z.string(),
+      name: z.string().optional(),
+    }),
+  }),
+  z.object({ id: z.string(), type: z.literal("selects_presets") }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_analyse"),
+    payload: z.object({
+      path: z.string(),
+      sampling_rate: z.number(),
+      force: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_rescore"),
+    payload: SelectsSettingsPayloadSchema,
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_evaluate"),
+    payload: SelectsSettingsPayloadSchema,
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_learn_context"),
+    payload: SelectsSettingsPayloadSchema,
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_rate"),
+    payload: z.object({
+      path: z.string(),
+      clip_path: z.string(),
+      start_sec: z.number(),
+      end_sec: z.number(),
+      rating: SelectRatingSchema.nullable(),
+      source: z.enum(["select", "near_miss"]),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_save_preset"),
+    payload: z.object({
+      name: z.string(),
+      settings: z.record(z.string(), z.unknown()),
+      description: z.string().optional(),
+      rationale: z.string().optional(),
+      accuracy: z.number().optional(),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_build_timeline"),
+    payload: z.object({
+      path: z.string(),
+      settings: z.record(z.string(), z.unknown()).optional(),
+      layout: z.enum(["context", "selects_only"]).optional(),
+      order: z
+        .enum(["timeline", "score_desc", "score_asc", "duration_desc", "duration_asc"])
+        .optional(),
+      include_markers: z.boolean().optional(),
+      clip_markers: z.boolean().optional(),
       name: z.string().optional(),
     }),
   }),
@@ -176,6 +255,107 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
     warnings: z.array(z.string()),
     error: z.string().nullable(),
   }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_presets_result"),
+    presets: z.array(z.object({ id: z.string(), name: z.string() }).loose()),
+  }),
+  // Selects progress — intermediate; does not resolve the call
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_progress"),
+    event: z.enum([
+      "analyse_started",
+      "clip_started",
+      "clip_progress",
+      "clip_analysed",
+      "clip_skipped",
+      "clip_error",
+    ]),
+    file: z.string().optional(),
+    fraction: z.number().optional(),
+    total_clips: z.number().optional(),
+    sampling_rate: z.number().optional(),
+    samples: z.number().optional(),
+    duration_sec: z.number().optional(),
+    reason: z.string().optional(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_analyse_complete"),
+    analysed: z.number(),
+    skipped: z.number(),
+    failed: z.number(),
+    total: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_rescore_result"),
+    settings: z.record(z.string(), z.unknown()),
+    warnings: z.array(z.string()).optional(),
+    clips: z.array(
+      z
+        .object({
+          file: z.string(),
+          name: z.string(),
+          analysed: z.boolean(),
+          duration_sec: z.number(),
+          segments: z.array(z.record(z.string(), z.unknown())),
+          near_misses: z.array(z.record(z.string(), z.unknown())),
+          scores: z.array(z.number()),
+        })
+        .loose(),
+    ),
+    summary: z.object({
+      clip_count: z.number(),
+      analysed_count: z.number(),
+      select_count: z.number(),
+      selected_sec: z.number(),
+      footage_sec: z.number(),
+      selected_pct: z.number(),
+    }),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_rate_result"),
+    clip_path: z.string(),
+    ratings: z.record(z.string(), z.record(z.string(), z.unknown())),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_evaluate_result"),
+    ...EvaluationSchema.shape,
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_learn_context_result"),
+    ready: z.boolean(),
+    reason: z.string().nullable(),
+    examples: z.array(z.record(z.string(), z.unknown())),
+    settings: z.record(z.string(), z.unknown()),
+    baseline: EvaluationSchema,
+    presets: z.array(z.object({ id: z.string(), name: z.string() })),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("selects_save_preset_result"),
+    preset: z.object({ id: z.string(), name: z.string() }).loose(),
+  }),
+  z
+    .object({
+      id: z.string(),
+      type: z.literal("selects_build_result"),
+      ok: z.boolean(),
+      name: z.string().nullable(),
+      select_count: z.number(),
+      piece_count: z.number(),
+      markers_added: z.number(),
+      tracks: z.record(z.string(), z.number()),
+      missing_paths: z.array(z.string()),
+      warnings: z.array(z.string()),
+      error: z.string().nullable(),
+    })
+    .loose(),
 ]);
 
 export type OutboundMessage = z.infer<typeof OutboundMessageSchema>;
@@ -185,6 +365,7 @@ export type IngestCompleteEvent = Extract<InboundMessage, { type: "ingest_comple
 export type ClassifyProgressEvent = Extract<InboundMessage, { type: "classify_progress" }>;
 export type ClassifyCompleteEvent = Extract<InboundMessage, { type: "classify_complete" }>;
 export type BuildTimelineResultEvent = Extract<InboundMessage, { type: "build_timeline_result" }>;
+export type SelectsProgressMessage = Extract<InboundMessage, { type: "selects_progress" }>;
 
 // Caller-facing type: OutboundMessage without the `id` field (bridge adds it).
 export type OutboundCall =
@@ -221,11 +402,14 @@ export type OutboundCall =
         path: string;
         name?: string;
       };
-    };
+    }
+  | DistributiveOmit<Extract<OutboundMessage, { type: `selects_${string}` }>, "id">;
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 // ── Bridge ───────────────────────────────────────────────────────────────────
 
-type ProgressEvent = IngestProgressEvent | ClassifyProgressEvent;
+type ProgressEvent = IngestProgressEvent | ClassifyProgressEvent | SelectsProgressMessage;
 
 type PendingCall = {
   resolve: (value: InboundMessage) => void;

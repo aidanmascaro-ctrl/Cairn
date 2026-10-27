@@ -42,7 +42,8 @@
     // In sandboxed renderers File.path is hidden, so resolve via the preload
     // bridge (webUtils.getPathForFile). Returns "" if the source isn't a real
     // file on disk — e.g. a synthetic drag payload from another app.
-    const resolved = cairn.getPathForFile(files[0]);
+    const first = files.item(0);
+    const resolved = first ? cairn.getPathForFile(first) : "";
     if (resolved) {
       folderPath = resolved;
       errorMsg = "";

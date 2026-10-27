@@ -16,15 +16,21 @@ The Node side (src/orchestrator/python-bridge.ts) is the sole caller.
 from __future__ import annotations
 
 import json
+import math
 import platform
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import classify as classify_worker
 import ingest as ingest_worker
 import resolve_api
+import selects as selects_worker
+import selects_learn
+import selects_score
+import selects_timeline
 import sidecar
 import timeline as timeline_worker
 
@@ -149,6 +155,134 @@ def handle_classify_inspect(msg: dict[str, Any]) -> dict[str, Any]:
     return {"id": msg["id"], "type": "classify_inspect_result", **result}
 
 
+# ── Stage 5: Selects ──────────────────────────────────────────────────────────
+
+
+def _shoot(payload: dict[str, Any]) -> str:
+    path = payload.get("path")
+    if not isinstance(path, str) or not path:
+        raise ValueError("payload.path (shoot folder) is required")
+    if not Path(path).is_dir():
+        raise ValueError(f"Shoot folder does not exist: {path}")
+    return path
+
+
+def _settings(payload: dict[str, Any], shoot: str) -> selects_score.SelectsSettings:
+    """Explicit settings win, then a preset id, then whatever the shoot last used."""
+    raw = payload.get("settings")
+    if isinstance(raw, dict):
+        return selects_score.settings_from_dict(raw)
+    preset_id = payload.get("preset_id")
+    if isinstance(preset_id, str) and preset_id:
+        return selects_learn.resolve_preset(preset_id)
+    return selects_worker.load_settings(shoot)
+
+
+def handle_selects_presets(msg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": msg["id"],
+        "type": "selects_presets_result",
+        "presets": selects_learn.list_all_presets(),
+    }
+
+
+def handle_selects_rescore(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    result = selects_worker.rescore(shoot, _settings(payload, shoot), persist=True)
+    return {"id": msg["id"], "type": "selects_rescore_result", **result}
+
+
+def handle_selects_rate(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    clip_path = payload.get("clip_path")
+    if not isinstance(clip_path, str) or not clip_path:
+        raise ValueError("payload.clip_path is required")
+    rating = payload.get("rating")
+    try:
+        start_sec = float(payload["start_sec"])
+        end_sec = float(payload["end_sec"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("payload.start_sec and payload.end_sec must be numbers") from exc
+    ratings = selects_learn.rate(
+        shoot,
+        clip_path,
+        start_sec,
+        end_sec,
+        rating if isinstance(rating, str) else None,
+        str(payload.get("source", "select")),
+    )
+    return {
+        "id": msg["id"],
+        "type": "selects_rate_result",
+        "clip_path": clip_path,
+        "ratings": ratings,
+    }
+
+
+def handle_selects_learn_context(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    ctx = selects_learn.learn_context(shoot, _settings(payload, shoot))
+    return {"id": msg["id"], "type": "selects_learn_context_result", **ctx}
+
+
+def handle_selects_evaluate(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    result = selects_learn.evaluate(shoot, _settings(payload, shoot))
+    return {"id": msg["id"], "type": "selects_evaluate_result", **result}
+
+
+def handle_selects_save_preset(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    raw = payload.get("settings")
+    if not isinstance(raw, dict):
+        raise ValueError("payload.settings is required")
+    accuracy = payload.get("accuracy")
+    entry = selects_learn.save_user_preset(
+        str(payload.get("name", "")),
+        selects_score.settings_from_dict(raw),
+        str(payload.get("description", "")),
+        str(payload.get("rationale", "")),
+        float(accuracy) if isinstance(accuracy, (int, float)) and math.isfinite(accuracy) else None,
+    )
+    return {"id": msg["id"], "type": "selects_save_preset_result", "preset": entry}
+
+
+def handle_selects_build_timeline(msg: dict[str, Any]) -> dict[str, Any]:
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    name = payload.get("name")
+    result = selects_timeline.build_selects_timeline(
+        shoot,
+        _settings(payload, shoot),
+        layout=str(payload.get("layout", "context")),
+        order=str(payload.get("order", "timeline")),
+        include_markers=bool(payload.get("include_markers", True)),
+        clip_markers=bool(payload.get("clip_markers", True)),
+        name=name if isinstance(name, str) and name.strip() else None,
+    )
+    return {"id": msg["id"], "type": "selects_build_result", **result}
+
+
+def handle_selects_analyse(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Analyse every clip once (stream). Re-tuning afterwards never decodes again."""
+    payload = msg.get("payload", {})
+    shoot = _shoot(payload)
+    rate = float(payload.get("sampling_rate", 4.0))
+    if rate not in (*selects_score.SAMPLING_RATES, selects_score.EVERY_FRAME):
+        raise ValueError(
+            f"sampling_rate must be one of {selects_score.SAMPLING_RATES} or 0 (every frame)"
+        )
+    for event in selects_worker.analyse_all(shoot, rate, force=bool(payload.get("force", False))):
+        if event["event"] == "analyse_complete":
+            yield {"id": msg["id"], "type": "selects_analyse_complete", **event}
+            return
+        yield {"id": msg["id"], "type": "selects_progress", **event}
+
+
 HANDLERS: dict[str, Any] = {
     "ping": handle_ping,
     "echo": handle_echo,
@@ -156,6 +290,13 @@ HANDLERS: dict[str, Any] = {
     "classify_confirm": handle_classify_confirm,
     "classify_inspect": handle_classify_inspect,
     "build_timeline": handle_build_timeline,
+    "selects_presets": handle_selects_presets,
+    "selects_rescore": handle_selects_rescore,
+    "selects_rate": handle_selects_rate,
+    "selects_learn_context": handle_selects_learn_context,
+    "selects_evaluate": handle_selects_evaluate,
+    "selects_save_preset": handle_selects_save_preset,
+    "selects_build_timeline": handle_selects_build_timeline,
 }
 
 # ── Streaming handlers ────────────────────────────────────────────────────────
@@ -344,6 +485,7 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
 STREAMING_HANDLERS: dict[str, Any] = {
     "ingest": handle_ingest,
     "classify": handle_classify,
+    "selects_analyse": handle_selects_analyse,
 }
 
 

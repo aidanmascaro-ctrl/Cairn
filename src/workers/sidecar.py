@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -26,6 +29,39 @@ def clip_id(absolute_path: str | Path) -> str:
 def sidecar_root(shoot_folder: str | Path) -> Path:
     """Returns the .cairn directory path (does not create it)."""
     return Path(shoot_folder) / "04_EXPORT" / ".cairn"
+
+
+def _atomic_write(target: Path, record: dict) -> None:
+    """Write via a temp file + rename so a crash never leaves a half-written sidecar."""
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record, indent=2))
+    os.replace(tmp, target)
+
+
+def _quarantine(target: Path, exc: Exception) -> None:
+    """Keep an unreadable sidecar for recovery instead of silently overwriting it."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    backup = target.with_name(f"{target.name}.corrupt-{stamp}")
+    try:
+        target.replace(backup)
+        print(f"[sidecar] {target} unreadable ({exc}); kept as {backup.name}", file=sys.stderr)
+    except OSError as move_exc:
+        print(
+            f"[sidecar] {target} unreadable ({exc}) and could not be moved: {move_exc}",
+            file=sys.stderr,
+        )
+
+
+def is_unreadable(shoot_folder: str | Path, absolute_path: str | Path) -> bool:
+    """True when a sidecar exists for the clip but can't be parsed."""
+    target = sidecar_root(shoot_folder) / f"{clip_id(absolute_path)}.json"
+    if not target.exists():
+        return False
+    try:
+        json.loads(target.read_text())
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return True
+    return False
 
 
 def write_clip(
@@ -54,8 +90,8 @@ def write_clip(
         try:
             existing = json.loads(target.read_text())
             existing_stages = existing.get("stages_complete", [])
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            _quarantine(target, exc)
 
     stages = list(dict.fromkeys(existing_stages + ["ingest"] + (extra_stages or [])))
 
@@ -70,7 +106,7 @@ def write_clip(
         "stages_complete": stages,
     }
 
-    target.write_text(json.dumps(record, indent=2))
+    _atomic_write(target, record)
     return target
 
 
@@ -90,11 +126,18 @@ def merge_clip(
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"{cid}.json"
 
+    record: dict
     if target.exists():
         try:
-            record: dict = json.loads(target.read_text())
-        except (json.JSONDecodeError, OSError):
-            record = {"schema_version": SCHEMA_VERSION, "clip_id": cid, "stages_complete": []}
+            record = json.loads(target.read_text())
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            _quarantine(target, exc)
+            record = {
+                "schema_version": SCHEMA_VERSION,
+                "clip_id": cid,
+                "source_path": str(Path(absolute_path).resolve()),
+                "stages_complete": [],
+            }
     else:
         record = {
             "schema_version": SCHEMA_VERSION,
@@ -108,7 +151,7 @@ def merge_clip(
     if new_stage and new_stage not in record.get("stages_complete", []):
         record["stages_complete"] = [*record.get("stages_complete", []), new_stage]
 
-    target.write_text(json.dumps(record, indent=2))
+    _atomic_write(target, record)
     return target
 
 

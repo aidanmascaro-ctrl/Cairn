@@ -217,6 +217,248 @@ export interface TimelineApi {
   build(payload: BuildTimelinePayload): Promise<BuildTimelineResult>;
 }
 
+// ── Stage 5: Selects ─────────────────────────────────────────────────────────
+
+export type FlagName =
+  | "clipping"
+  | "duplicate"
+  | "solid_color"
+  | "hard_cut"
+  | "motion_blur"
+  | "shaky"
+  | "low_light";
+export type FlagTier = "exclude" | "disfavour" | "neutral" | "favour" | "include";
+export type SelectGroup = "focus" | "exposure" | "motion";
+export type SubMetric =
+  | "sharpness"
+  | "detail"
+  | "focus_stability"
+  | "headroom"
+  | "flicker"
+  | "luma_target"
+  | "contrast_target"
+  | "camera_stillness"
+  | "subject_stillness"
+  | "motion_smoothness";
+export type CameraAxis = "pan" | "tilt" | "zoom" | "twist";
+
+export interface CameraFilter {
+  enabled: boolean;
+  static_only: boolean;
+  pan: number;
+  tilt: number;
+  zoom: number;
+  twist: number;
+  strictness: number;
+  mirror: boolean;
+}
+
+export interface SelectsSettings {
+  preset_id: string;
+  sampling_rate: number;
+  group_weights: Record<SelectGroup, number>;
+  sub_weights: Record<SubMetric, number>;
+  targets: { luma: number; contrast: number };
+  score_threshold_lo: number;
+  score_threshold_hi: number;
+  min_segment_sec: number;
+  max_segment_sec: number | null;
+  max_segments_per_clip: number | null;
+  dip_sec: number;
+  handles_samples: number;
+  flags: Record<FlagName, FlagTier>;
+  camera_filter: CameraFilter;
+  metrics_enabled: boolean;
+  flags_enabled: boolean;
+}
+
+export interface SelectsPreset {
+  id: string;
+  name: string;
+  description: string;
+  settings: SelectsSettings;
+  builtin: boolean;
+  rationale?: string;
+  accuracy?: number | null;
+}
+
+export interface SelectSegment {
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
+  core_start_sec: number;
+  core_end_sec: number;
+  mean_score: number;
+  peak_score: number;
+  peak_sec: number;
+  group_scores: Record<SelectGroup, number | null>;
+  flags: FlagName[];
+  camera: Record<CameraAxis, number> & { confidence: number; class: string };
+  forced: boolean;
+}
+
+export type SelectRatingValue = "keep" | "reject";
+
+export interface SelectRating {
+  rating: SelectRatingValue;
+  start_sec: number;
+  end_sec: number;
+  source: "select" | "near_miss";
+  rated_at: string;
+}
+
+export interface SelectsClip {
+  file: string;
+  name: string;
+  classification: string | null;
+  ratings: Record<string, SelectRating>;
+  analysed: boolean;
+  duration_sec: number;
+  fps?: number;
+  sampling_rate?: number;
+  scores: number[];
+  segments: SelectSegment[];
+  near_misses: SelectSegment[];
+  sample_count?: number;
+  qualifying_count?: number;
+}
+
+export interface SelectsSummary {
+  clip_count: number;
+  analysed_count: number;
+  select_count: number;
+  selected_sec: number;
+  footage_sec: number;
+  selected_pct: number;
+}
+
+export interface SelectsRescoreResult {
+  settings: SelectsSettings;
+  clips: SelectsClip[];
+  summary: SelectsSummary;
+  /** Unreadable clip records or saved tuning, a failed save — shown, never swallowed. */
+  warnings?: string[];
+}
+
+export interface SelectsProgressEvent {
+  event:
+    | "analyse_started"
+    | "clip_started"
+    | "clip_progress"
+    | "clip_analysed"
+    | "clip_skipped"
+    | "clip_error";
+  file?: string;
+  fraction?: number;
+  total_clips?: number;
+  samples?: number;
+  duration_sec?: number;
+  reason?: string;
+}
+
+export interface SelectsAnalyseResult {
+  analysed: number;
+  skipped: number;
+  failed: number;
+  total: number;
+}
+
+export interface SelectsEvaluation {
+  total: number;
+  correct: number;
+  accuracy: number;
+  keeps_kept: number;
+  keeps_total: number;
+  rejects_dropped: number;
+  rejects_total: number;
+}
+
+export interface SelectsLearnResult {
+  ok: boolean;
+  error?: string;
+  /** Set when a retry failed but an earlier proposal is still being returned. */
+  warning?: string;
+  model?: string;
+  rounds?: number;
+  improved?: boolean;
+  example_count?: number;
+  before?: SelectsEvaluation;
+  after?: SelectsEvaluation;
+  proposal?: {
+    preset_name: string;
+    rationale: string;
+    changes: string[];
+    settings: SelectsSettings;
+  };
+}
+
+export type SelectsLayout = "context" | "selects_only";
+export type SelectsOrder =
+  | "timeline"
+  | "score_desc"
+  | "score_asc"
+  | "duration_desc"
+  | "duration_asc";
+
+export interface SelectsBuildPayload {
+  path: string;
+  settings: SelectsSettings;
+  layout: SelectsLayout;
+  order: SelectsOrder;
+  include_markers: boolean;
+  clip_markers: boolean;
+  name?: string;
+}
+
+export interface SelectsBuildResult {
+  ok: boolean;
+  name: string | null;
+  layout: SelectsLayout | null;
+  fps: number | null;
+  resolution: string | null;
+  select_count: number;
+  piece_count: number;
+  linked_count: number;
+  markers_added: number;
+  clip_markers_added: number;
+  tracks: Record<string, number>;
+  missing_paths: string[];
+  warnings: string[];
+  error: string | null;
+}
+
+export interface SelectsApi {
+  presets(): Promise<{ presets: SelectsPreset[] }>;
+  analyse(payload: {
+    path: string;
+    sampling_rate: number;
+    force?: boolean;
+  }): Promise<SelectsAnalyseResult>;
+  onProgress(callback: (event: SelectsProgressEvent) => void): () => void;
+  rescore(payload: {
+    path: string;
+    settings?: SelectsSettings;
+    preset_id?: string;
+  }): Promise<SelectsRescoreResult>;
+  rate(payload: {
+    path: string;
+    clip_path: string;
+    start_sec: number;
+    end_sec: number;
+    rating: SelectRatingValue | null;
+    source: "select" | "near_miss";
+  }): Promise<{ clip_path: string; ratings: Record<string, SelectRating> }>;
+  learn(payload: { path: string; settings: SelectsSettings }): Promise<SelectsLearnResult>;
+  savePreset(payload: {
+    name: string;
+    settings: SelectsSettings;
+    description?: string;
+    rationale?: string;
+    accuracy?: number;
+  }): Promise<{ preset: SelectsPreset }>;
+  build(payload: SelectsBuildPayload): Promise<SelectsBuildResult>;
+}
+
 export interface HealthResult {
   workflowIntegration: boolean;
   workflowError: string | null;
@@ -246,5 +488,6 @@ export interface CairnBridge {
   ingest: IngestApi;
   classify: ClassifyApi;
   timeline: TimelineApi;
+  selects: SelectsApi;
   keys: KeysApi;
 }

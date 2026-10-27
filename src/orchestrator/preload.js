@@ -132,6 +132,51 @@ contextBridge.exposeInMainWorld("cairn", {
     inspect: (payload) => ipcRenderer.invoke("cairn:classify:inspect", payload),
   },
 
+  selects: {
+    /** Built-in and learned presets. */
+    presets: () => ipcRenderer.invoke("cairn:selects:presets"),
+    /**
+     * Analyse every clip once (decode + measure). Streams cairn:selects:progress.
+     * @param {{ path: string, sampling_rate: number, force?: boolean }} payload
+     */
+    analyse: (payload) => ipcRenderer.invoke("cairn:selects:analyse", payload),
+    /**
+     * Subscribe to analysis progress. Returns an unsubscribe function.
+     * @param {(event: object) => void} callback
+     * @returns {() => void}
+     */
+    onProgress: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("cairn:selects:progress", listener);
+      return () => ipcRenderer.removeListener("cairn:selects:progress", listener);
+    },
+    /**
+     * Re-score from stored measurements (instant; nothing is decoded).
+     * @param {{ path: string, settings?: object, preset_id?: string }} payload
+     */
+    rescore: (payload) => ipcRenderer.invoke("cairn:selects:rescore", payload),
+    /**
+     * Rate a select or near miss. rating null clears it.
+     * @param {{ path: string, clip_path: string, start_sec: number, end_sec: number, rating: "keep"|"reject"|null, source: "select"|"near_miss" }} payload
+     */
+    rate: (payload) => ipcRenderer.invoke("cairn:selects:rate", payload),
+    /**
+     * Ask Claude to learn settings from the ratings (numbers only, no media).
+     * @param {{ path: string, settings?: object }} payload
+     */
+    learn: (payload) => ipcRenderer.invoke("cairn:selects:learn", payload),
+    /**
+     * Save settings as a personal preset (available on every shoot).
+     * @param {{ name: string, settings: object, description?: string, rationale?: string, accuracy?: number }} payload
+     */
+    savePreset: (payload) => ipcRenderer.invoke("cairn:selects:savePreset", payload),
+    /**
+     * Build the selects timeline in Resolve.
+     * @param {{ path: string, settings?: object, layout?: "context"|"selects_only", order?: string, include_markers?: boolean, clip_markers?: boolean, name?: string }} payload
+     */
+    build: (payload) => ipcRenderer.invoke("cairn:selects:build", payload),
+  },
+
   keys: {
     /** Retrieve stored API keys from the OS keychain. */
     get: () => ipcRenderer.invoke("cairn:keys:get"),
