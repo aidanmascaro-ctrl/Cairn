@@ -21,6 +21,12 @@ Cairn never cuts your video. It does the logging and the sorting, so you can sta
 
 Put a card in and Offload opens from the menu bar. It works out which camera shot it, how many separate shoots are on it, and how much of it is already on your drive.
 
+<p align="center">
+  <img src="docs/readme/offload-cards.png" alt="Offload's Cards tab: all 3,647 files on the card are on Lexar 4TB, safe to format" width="48%" valign="top">
+  &nbsp;
+  <img src="docs/readme/offload-library.png" alt="Offload's Library tab: every shoot across three drives, with client tags, cameras, clip counts and sizes" width="48%" valign="top">
+</p>
+
 |                                 |                                                                                                                                                                                                                           |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Skips what's already copied** | Files are matched by content (exact size, plus the first and last megabyte), not by name. Re-insert a half-copied card and only the rest is copied. A card it has seen before is checked again in a fraction of a second. |
