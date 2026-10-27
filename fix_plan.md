@@ -96,7 +96,7 @@ Each entry:
 
 ### Plugin dist/ rebuild required before Stage 1 can be fully verified
 
-- **Status:** open
+- **Status:** resolved 2026-10-27 — `dist/` chowned back to the user, rebuilt, plugin reinstalled in symlink mode (source edits now only need a Resolve restart)
 - **Opened:** Session 2 / 2026-04-25
 - **Area:** packaging / `dist/` — built UI assets
 - **Symptom / gap:** `dist/` was made root-owned by a prior `sudo`-level install run. All ingest fixes (reclassification, empty-shell removal, bin structure) were written against the source files but `dist/` has never been rebuilt with them. The live plugin is running stale compiled output.
@@ -104,12 +104,13 @@ Each entry:
 
 ### Bin structure in Resolve media pool unverified
 
-- **Status:** in-progress
+- **Status:** resolved 2026-10-27 (Offload layout) — live ingest from inside the plugin of `Lexar 4TB/NORTHWIND MEDIA/261015 2 harvest dinner` built `Master/Cairn/Footage/FX30` (22) and `.../vid` (45), matching the clips on disk exactly. So the bridge's scripting connection works from the plugin sandbox. The old `01_VIDEOS/...` layout (non-Offload folders) is still untested live.
 - **Opened:** Session 2 / 2026-04-25
 - **Area:** `src/workers/resolve_import.py`
 - **Symptom / gap:** `resolve_import.py` was updated to use `_find_or_create()` per-bin approach (creating `<shoot>/01_VIDEOS/A_CAM`, `/C_CAM`, `/02_PHOTOS` bins in Resolve Master), but this was not tested live before the session ended. Prior versions imported clips flat into Master.
-- **MCP verified 2026-04-29:** `mp.AddSubFolder(parent, name)` (two-arg form on MediaPool) and `mp.SetCurrentFolder` both confirmed working via MCP test on Resolve Studio 21.0.0b.20. Nested path `Master/_cairn_test/01_VIDEOS/A_CAM` created successfully and cleaned up. API shape matches `resolve_import.py` — per-bin strategy is correct.
-- **Next step:** Rebuild plugin (`sudo chown -R $(whoami) dist && npm run build:ui && sudo bash packaging/install-dev-plugin.sh`), restart Resolve, run ingest end-to-end to confirm clips land in nested bins.
+- **MCP verified 2026-04-29:** `mp.AddSubFolder(parent, name)` (two-arg form on MediaPool) and `mp.SetCurrentFolder` both confirmed working via MCP test on Resolve Studio 21.0.0b.20. Nested path `Master/_cairn_test/01_VIDEOS/A_CAM` created successfully and cleaned up.
+- **MCP re-verified 2026-06-07 on Resolve Studio 21.0.0.48:** ran the _real_ `resolve_api.find_or_create_bin` + `SetCurrentFolder` against the live media pool under `Master/_cairn_test` — bins created, idempotent (no duplicate bins on re-call), `SetCurrentFolder` truthy, fully cleaned up. The proper import path now used is `bridge.py handle_ingest → resolve_api.ingest_into_resolve` (builds `Master/Cairn/01_VIDEOS/...`). See the Resolved entry below.
+- **Next step (only remaining unknown):** confirm the bridge worker's Python scripting connection holds _from inside the Electron plugin sandbox_ — run ingest live in the plugin and check the `cairn:health` `scripting_ok` flag. If it returns false in-plugin, the bridge cannot reach Resolve from a plugin child and we need to solve that one boundary (env propagation), but the import logic itself is verified.
 
 ### Photomator Edit Documents not moving to 02_PHOTOS
 
@@ -139,4 +140,27 @@ Each entry:
 
 ## Resolved
 
-_No entries yet._
+### DaVinci import did nothing / showed an error after ingest
+
+- **Status:** resolved (code) — pending one live in-plugin confirmation (see bin-structure item above)
+- **Opened / fixed:** Session / 2026-06-07
+- **Area:** `src/orchestrator/main.js` (`cairn:ingest` handler), `src/workers/resolve_import.py`
+- **Root cause:** main.js disabled the working import path and used a broken fallback. It sent `resolve: false` to the bridge, so the proper bin-tree import (`bridge.py handle_ingest → resolve_api.ingest_into_resolve`) never ran. It then always fell through to `importFolderToResolve`, which spawned `resolve_import.py` as a **second OS process opening a second Resolve Scripting connection** — a Taste Invariant #3 violation (the scripting API is not process-safe). Inside the Electron plugin sandbox that second connection hangs/errors; the only thing that ever ran was a flat, bin-less JS `ImportMedia` (or nothing). A plain-Terminal subprocess connects fine (verified under Python 3.14), which is why the failure is sandbox/concurrency-specific, not a Python-version or scripting-disabled problem.
+- **Fix:** route the whole import through the single bridge worker — `main.js` now passes `resolve: true` and lets `handle_ingest` do org + the proper Cairn bin-tree import in one streamed call. Deleted `importFolderToResolve` / `importViaResolveScript` (the second-process spawn) and the dead `scanDir`/`VIDEO_EXTS`/`PHOTO_EXTS`. Handler now throws on a non-`ingest_complete` terminal message so a bridge error surfaces in the UI instead of a hollow "done". `resolve_import.py` tombstoned (inert) so the wrong pattern can't be re-introduced.
+- **Verification:** new `tests/python/test_resolve_api.py` (bin tree, routing, dedup, JPEG-stills, no-project guard) — 5 pass; full suite 119 pass; eslint/tsc/vitest/ruff/pyrefly clean; live MCP test of the real `resolve_api` bin calls on Resolve 21.0.0.48.
+
+## Offload (card offload, `offload/`) — open items · 2026-10-26
+
+Native Swift menu-bar app modelled on thebackedapp.com: card in → "N of M files aren't on <drive> yet" (content-matched) → New shoot (Client / dd.MM.yy Shoot / Footage/<Camera>, Photos, Project) → verified copy (SHA-256 read-back) → writes `<shoot>/.cairn/offload.json` + `~/Library/Application Support/Cairn/offload-inbox.json`. Build: `cd offload && swift build`; checks: `swift run OffloadSelfTest` (no Xcode on this Mac, so no XCTest / swift-testing / SwiftUI `@State`).
+
+- [x] **Cairn side of the hand-off** — DropZone lists "Ready from Offload" (polls `cairn:offload:inbox` every 10s + on focus); Sort runs `cairn:ingest` on the shoot and `cairn:offload:done` drops the entry.
+- [x] **Layout clash** — `ingest.run()` detects `<shoot>/.cairn/offload.json` and imports **in place** (no rename/moves). Resolve bins: `Cairn/Footage/<Camera>` per camera folder + `Cairn/Photos` (`resolve_api.ingest_offload_into_resolve`). Clip sidecars go in `<shoot>/.cairn/` (`sidecar.sidecar_root`); classify scans `Footage/*/`. Tests: `tests/python/test_offload_ingest.py`.
+- [x] **Offload Resolve import live-tested** (2026-10-26, Resolve 21.1.0.14): 2 real clips → `Master/Cairn/Footage/FX3` + `.../A7S3`, 1 clip each; re-run imported 0 (dedup OK). Test bins deleted after.
+- [x] **Clip metadata silently dropped (all ingests, not just Offload).** Fixed 2026-10-27. Ingest now writes `Camera Type` / `Date Recorded` / `Lens Type` (Resolve fields), and Cairn's own keys (`Cairn Stage`, `Cairn Classification`) go through `SetThirdPartyMetadata` — `SetMetadata` refuses any non-Resolve field name, so classify's A/B label was being dropped too. `set_clip_metadata` returns the refused keys; the bridge streams a `metadata_refused` event shown as ⚠ in the ingest log. Offload bins get their camera folder name as Camera Type. Verified live on Resolve 21.1 with the real function. Re-ingest also fills **blank** fields on clips already in the bin (`_import_and_tag`), never overwriting an editor's value or a later Cairn Stage; backfilled the 67 clips of `261015 2 harvest dinner` live (22 FX30 + 45 vid, 0 re-imported).
+- [ ] **Timeline build on Offload shoots** — `timeline.py` untested with the Footage/<Camera> layout.
+- [ ] **Downloads sorting** (music / VO / LUTs → shoot Assets) — not built.
+- [x] **.app bundle** — `offload/bundle.sh` → `offload/build/Offload.app` (LSUIElement, ad-hoc signed). Must be launched via `open`/Finder: a binary started from a shell gets DiskArbitration `kDAReturnNotPrivileged` on eject.
+- [x] **Start at login** — `bundle.sh` installs to `~/Applications/Offload.app`; first launch from there registers an SMAppService login item once (switching it off in System Settings sticks).
+- [ ] **Eject not yet confirmed from Offload.app** — DiskArbitration path built; needs one real card.
+- [ ] **Non-Sony camera detection** — only Sony XML serials read; DJI/Canon/BMD fall back to "Camera".
+- [ ] **Not tested on a real card** — logic verified on temp files only.

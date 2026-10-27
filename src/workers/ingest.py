@@ -121,6 +121,86 @@ def already_organised(folder: Path) -> bool:
     return any((folder / d).is_dir() for d in ["01_VIDEOS", "02_PHOTOS"])
 
 
+OFFLOAD_MANIFEST = Path(".cairn") / "offload.json"
+
+
+def is_offload_shoot(folder: str | Path) -> bool:
+    """A shoot copied off a card by the Offload menu-bar app (offload/ in this repo)."""
+    return (Path(folder) / OFFLOAD_MANIFEST).is_file()
+
+
+def read_offload_manifest(folder: str | Path) -> dict:
+    path = Path(folder) / OFFLOAD_MANIFEST
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise IngestError(f"Could not read Offload manifest {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise IngestError(f"Offload manifest {path} is not a JSON object")
+    return data
+
+
+def offload_camera_dirs(folder: str | Path, manifest: dict | None = None) -> dict[str, Path]:
+    """Camera name -> its footage folder. Each becomes one Resolve bin.
+
+    Normal layout is Footage/<Camera>/. A "Choose folder…" copy has no Footage/
+    dir, so fall back to the footage_folder + camera recorded in the manifest.
+    """
+    footage = Path(folder) / "Footage"
+    if footage.is_dir():
+        return {
+            d.name: d for d in sorted(footage.iterdir()) if d.is_dir() and not d.name.startswith(".")
+        }
+    manifest = manifest if manifest is not None else read_offload_manifest(folder)
+    footage_dir = Path(manifest.get("footage_folder") or folder)
+    return {str(manifest.get("camera") or "Camera"): footage_dir}
+
+
+def _media_in(directory: Path, exts: set[str]) -> list[str]:
+    if not directory.is_dir():
+        return []
+    return sorted(str(f) for f in directory.iterdir() if f.is_file() and f.suffix.lower() in exts)
+
+
+def run_offload(folder: Path, dry_run: bool = False) -> Iterator[dict]:
+    """Ingest an Offload shoot IN PLACE: no rename, no moves, no template dirs.
+
+    Offload already filed and verified the footage, so this only gathers paths
+    for sidecars + the Resolve import, where each camera folder becomes a bin.
+    """
+    manifest = read_offload_manifest(folder)
+    try:
+        shoot_date = datetime.strptime(str(manifest.get("date", "")), "%Y-%m-%d").strftime("%y%m%d")
+    except ValueError:
+        shoot_date = datetime.now().strftime("%y%m%d")
+    meta = {
+        "shoot_date": shoot_date,
+        "camera": str(manifest.get("camera_model") or manifest.get("camera") or ""),
+        "lens": "",
+        "timecode_start": "",
+    }
+
+    camera_clips = {
+        name: _media_in(directory, VIDEO_EXTS)
+        for name, directory in offload_camera_dirs(folder, manifest).items()
+    }
+    photos = _media_in(folder / "Photos", PHOTO_EXTS - {".xmp"})
+    yield {"event": "offload_detected", "cameras": sorted(camera_clips), "dry_run": dry_run}
+
+    yield {
+        "event": "complete",
+        "layout": "offload",
+        "folder": str(folder),
+        "files_moved": 0,
+        "move_failures": 0,
+        "shells_removed": 0,
+        "metadata": meta,
+        "clip_paths": {"a_cam": [], "c_cam": [], "photos": photos, "assets": []},
+        "camera_clips": camera_clips,
+        "dry_run": dry_run,
+    }
+
+
 def has_loose_media(folder: Path) -> bool:
     return any(
         f.is_file() and f.suffix.lower() in VIDEO_EXTS | PHOTO_EXTS for f in folder.rglob("*")
@@ -422,6 +502,10 @@ def run(
     """
     folder = Path(path).resolve()
     preflight(folder)
+
+    if is_offload_shoot(folder):
+        yield from run_offload(folder, dry_run)
+        return
 
     # ── Rename ───────────────────────────────────────────────────────────────
     meta = extract_sony_metadata(folder)

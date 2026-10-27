@@ -35,6 +35,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import ingest
+
 # ── Tunable thresholds ────────────────────────────────────────────────────────
 
 FACE_THRESHOLD: float = 0.40  # rule-based fallback: >=40% frames with face
@@ -308,9 +310,18 @@ def classify_clip(
 
 
 def scan_video_clips(shoot_folder: str | Path) -> list[str]:
-    """Return sorted absolute paths of all video clips under 01_VIDEOS/."""
+    """Return sorted absolute paths of all video clips under 01_VIDEOS/
+    (or under each Footage/<Camera>/ for an Offload shoot)."""
     folder = Path(shoot_folder)
     paths: list[str] = []
+    if ingest.is_offload_shoot(folder):
+        for cam_dir in ingest.offload_camera_dirs(folder).values():
+            paths.extend(
+                str(f)
+                for f in sorted(cam_dir.iterdir())
+                if f.is_file() and f.suffix.lower() in _VIDEO_EXTS
+            )
+        return paths
     for cam_dir in ("A_CAM", "B_CAM", "C_CAM"):
         target = folder / "01_VIDEOS" / cam_dir
         if target.is_dir():

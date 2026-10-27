@@ -368,10 +368,23 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
                 metadata=metadata,
             )
 
+        # Offload shoots: one bin per camera folder (Footage/<Camera>).
+        camera_clips: dict[str, list[str]] = result.get("camera_clips", {})
+        for camera, paths in camera_clips.items():
+            for clip_path in paths:
+                sidecar.write_clip(
+                    shoot_folder=shoot_folder,
+                    absolute_path=clip_path,
+                    bin_path=f"Footage/{camera}",
+                    kind="video",
+                    metadata=metadata,
+                )
+
         sidecar_count = (
             len(clip_paths.get("a_cam", []))
             + len(clip_paths.get("c_cam", []))
             + len(clip_paths.get("photos", []))
+            + sum(len(paths) for paths in camera_clips.values())
         )
         yield {
             "id": msg_id,
@@ -381,25 +394,52 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         }
 
     resolve_counts: dict[str, int] = {}
+    refused_fields: list[str] = []
     if do_resolve:
         try:
-            resolve_counts = resolve_api.ingest_into_resolve(
-                shoot_folder=result["folder"],
-                clip_paths=result.get("clip_paths", {}),
-                metadata=result.get("metadata", {}),
-            )
+            if result.get("layout") == "offload":
+                imported = resolve_api.ingest_offload_into_resolve(
+                    shoot_folder=result["folder"],
+                    camera_clips=result.get("camera_clips", {}),
+                    photo_paths=result.get("clip_paths", {}).get("photos", []),
+                    metadata=result.get("metadata", {}),
+                )
+            else:
+                imported = resolve_api.ingest_into_resolve(
+                    shoot_folder=result["folder"],
+                    clip_paths=result.get("clip_paths", {}),
+                    metadata=result.get("metadata", {}),
+                )
+            resolve_counts, refused_fields = imported.counts, imported.refused_fields
             yield {
                 "id": msg_id,
                 "type": "ingest_progress",
                 "event": "resolve_imported",
                 **resolve_counts,
             }
+            if refused_fields:
+                yield {
+                    "id": msg_id,
+                    "type": "ingest_progress",
+                    "event": "metadata_refused",
+                    "fields": refused_fields,
+                }
         except resolve_api.ResolveUnavailableError as exc:
             yield {
                 "id": msg_id,
                 "type": "ingest_progress",
                 "event": "resolve_skipped",
                 "reason": str(exc),
+            }
+        except Exception as exc:
+            # Files are already organised and sidecars written by now: report the
+            # Resolve failure but still send ingest_complete, so that work isn't lost.
+            print(f"[bridge] Resolve import failed: {exc!r}", file=sys.stderr)
+            yield {
+                "id": msg_id,
+                "type": "ingest_progress",
+                "event": "resolve_skipped",
+                "reason": f"Resolve import failed: {exc}",
             }
 
     yield {
@@ -410,7 +450,10 @@ def handle_ingest(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
         "shells_removed": result.get("shells_removed", 0),
         "metadata": result.get("metadata", {}),
         "clip_paths": result.get("clip_paths", {}),
+        "layout": result.get("layout", "organised"),
+        "camera_clips": result.get("camera_clips", {}),
         "resolve_counts": resolve_counts,
+        "metadata_refused": refused_fields,
         "dry_run": dry_run,
         "timestamp_iso": _now(),
     }

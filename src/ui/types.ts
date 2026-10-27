@@ -87,6 +87,8 @@ export interface IngestProgressEvent {
   reason?: string;
   dry_run?: boolean;
   total?: number;
+  /** metadata_refused: clip metadata fields Resolve wouldn't store. */
+  fields?: string[];
 }
 
 export interface IngestResult {
@@ -97,9 +99,34 @@ export interface IngestResult {
   shells_removed: number;
   metadata: IngestMetadata;
   clip_paths: IngestClipPaths;
+  /** "offload" = imported in place from an Offload shoot (Footage/<Camera>). */
+  layout?: "organised" | "offload";
+  /** Offload shoots only: camera folder name → clip paths (one Resolve bin each). */
+  camera_clips?: Record<string, string[]>;
   resolve_counts: Record<string, number>;
+  /** Clip metadata fields Resolve refused to store (empty = all written). */
+  metadata_refused?: string[];
   dry_run: boolean;
   timestamp_iso: string;
+}
+
+/** A shoot the Offload menu-bar app copied off a card and Cairn hasn't sorted yet. */
+export interface OffloadShoot {
+  shoot_folder: string;
+  added_at: string | null;
+  /** false when the drive holding the shoot isn't plugged in. */
+  available: boolean;
+  client: string;
+  shoot_name: string;
+  camera: string;
+  /** yyyy-MM-dd */
+  date: string;
+  file_count: number;
+}
+
+export interface OffloadApi {
+  list(): Promise<OffloadShoot[]>;
+  done(shootFolder: string): Promise<boolean>;
 }
 
 export interface IngestApi {
@@ -486,6 +513,7 @@ export interface CairnBridge {
   ping(): Promise<PingResult>;
   echo(payload: string): Promise<EchoResult>;
   ingest: IngestApi;
+  offload: OffloadApi;
   classify: ClassifyApi;
   timeline: TimelineApi;
   selects: SelectsApi;

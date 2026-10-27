@@ -70,8 +70,10 @@ contextBridge.exposeInMainWorld("cairn", {
 
   ingest: {
     /**
-     * Run the ingest pipeline for one shoot folder.
-     * @param {{ path: string, name?: string, dry_run?: boolean, write_sidecar?: boolean, resolve?: boolean }} payload
+     * Run the ingest pipeline for one shoot folder. The Resolve import always
+     * runs through the single bridge worker; the main process forces resolve:true
+     * (a caller-supplied `resolve` flag is ignored). dry_run still skips Resolve.
+     * @param {{ path: string, name?: string, dry_run?: boolean, write_sidecar?: boolean }} payload
      */
     run: (payload) => ipcRenderer.invoke("cairn:ingest", payload),
     /**
@@ -84,6 +86,20 @@ contextBridge.exposeInMainWorld("cairn", {
       ipcRenderer.on("cairn:ingest:progress", listener);
       return () => ipcRenderer.removeListener("cairn:ingest:progress", listener);
     },
+  },
+
+  offload: {
+    /**
+     * Shoots the Offload menu-bar app has copied off a card and not yet sorted.
+     * @returns {Promise<Array<{shoot_folder: string, added_at: string|null, available: boolean, client: string, shoot_name: string, camera: string, date: string, file_count: number}>>}
+     */
+    list: () => ipcRenderer.invoke("cairn:offload:inbox"),
+    /**
+     * Remove a shoot from the inbox once it has been ingested.
+     * @param {string} shootFolder
+     * @returns {Promise<boolean>}
+     */
+    done: (shootFolder) => ipcRenderer.invoke("cairn:offload:done", shootFolder),
   },
 
   timeline: {

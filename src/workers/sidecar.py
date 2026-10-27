@@ -27,7 +27,14 @@ def clip_id(absolute_path: str | Path) -> str:
 
 
 def sidecar_root(shoot_folder: str | Path) -> Path:
-    """Returns the .cairn directory path (does not create it)."""
+    """Returns the .cairn directory path (does not create it).
+
+    Offload shoots (Footage/<Camera> layout, no 04_EXPORT) already carry
+    <shoot>/.cairn/offload.json, so their clip sidecars live alongside it.
+    """
+    offload_root = Path(shoot_folder) / ".cairn"
+    if (offload_root / "offload.json").is_file():
+        return offload_root
     return Path(shoot_folder) / "04_EXPORT" / ".cairn"
 
 

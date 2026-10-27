@@ -19,7 +19,7 @@ Usage:
                 find_or_create_bin(cairn, "01_VIDEOS"), "A_CAM"), "A_CAM")
     clips  = import_clips(mp, a_cam, ["/path/to/file.mp4"])
     for clip in clips:
-        set_clip_metadata(clip, {"Camera": "Sony a7S III", "Cairn Stage": "ingested"})
+        refused = set_clip_metadata(clip, {"Camera Type": "Sony a7S III", "Cairn Stage": "ingested"})
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import contextlib
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 # ── Resolve Scripting API import ──────────────────────────────────────────────
 
@@ -197,16 +197,89 @@ def import_clips(
     return collected
 
 
-def set_clip_metadata(clip: Any, metadata: dict[str, str]) -> bool:
+# Cairn's own fields ("Cairn Stage", "Cairn Classification") aren't Resolve fields:
+# SetMetadata refuses any name not in the clip's Metadata panel. They go through
+# SetThirdPartyMetadata, which takes custom keys. Verified on Resolve Studio
+# 21.1 (2026-10-27): SetMetadata accepts "Camera Type", "Date Recorded",
+# "Lens Type", "Keywords", "Comments", "Description"; it refuses "Camera",
+# "Shoot Date", "Lens", "Timecode Start", "Keyword" and every "Cairn …" key.
+CAIRN_FIELD_PREFIX: str = "Cairn "
+
+
+def set_clip_metadata(clip: Any, metadata: dict[str, str]) -> list[str]:
     """
-    Call SetMetadata for each key in `metadata`. Returns True if all calls
-    succeeded, False if any failed (Resolve returns False on bad key names).
+    Write each non-empty value in `metadata` to `clip`: Cairn's own keys as
+    third-party metadata, everything else as a Resolve metadata field.
+
+    Returns the keys Resolve refused (empty list = all written). Resolve
+    refuses by returning False rather than raising, so callers must check.
     """
-    ok = True
+    refused: list[str] = []
     for key, value in metadata.items():
-        if not clip.SetMetadata(key, value):
-            ok = False
-    return ok
+        if not value:
+            continue
+        if key.startswith(CAIRN_FIELD_PREFIX):
+            ok = clip.SetThirdPartyMetadata(key, value)
+        else:
+            ok = clip.SetMetadata(key, value)
+        if not ok:
+            refused.append(key)
+    return refused
+
+
+def _blank_fields(clip: Any, metadata: dict[str, str]) -> dict[str, str]:
+    """The entries of `metadata` the clip has no value for yet."""
+
+    def current(key: str) -> Any:
+        return (
+            clip.GetThirdPartyMetadata(key)
+            if key.startswith(CAIRN_FIELD_PREFIX)
+            else clip.GetMetadata(key)
+        )
+
+    return {key: value for key, value in metadata.items() if not current(key)}
+
+
+def _fill_metadata(clips: list[Any], metadata: dict[str, str], refused: set[str]) -> None:
+    """
+    Write `metadata` to each clip's blank fields only, adding refused keys to
+    `refused`. Never overwrites: an editor's own Camera Type survives a
+    re-ingest, and a later Cairn Stage ("transcribed") isn't reset to "ingested".
+    """
+    for clip in clips:
+        refused.update(set_clip_metadata(clip, _blank_fields(clip, metadata)))
+
+
+def _import_and_tag(
+    media_pool: Any,
+    bin_folder: Any,
+    paths: list[str],
+    metadata: dict[str, str],
+    refused: set[str],
+    *,
+    stills: bool = False,
+) -> int:
+    """
+    import_clips, then fill in metadata on the new clips AND on the ones a
+    previous ingest already put in this bin (imported before metadata worked,
+    they'd otherwise stay blank: dedup skips them). Returns the number imported.
+    """
+    wanted = set(paths)
+    already = [
+        item
+        for item in bin_folder.GetClipList()
+        if item is not None and item.GetClipProperty("File Path") in wanted
+    ]
+    imported = import_clips(media_pool, bin_folder, paths, stills=stills)
+    _fill_metadata(imported + already, metadata, refused)
+    return len(imported)
+
+
+class ResolveImport(NamedTuple):
+    """Clips imported per bin, plus metadata fields Resolve refused to store."""
+
+    counts: dict[str, int]
+    refused_fields: list[str]
 
 
 _VIDEO_EXTS = {".mp4", ".mov", ".mxf", ".avi", ".m2ts"}
@@ -224,16 +297,18 @@ def ingest_into_resolve(
     shoot_folder: str | Path,
     clip_paths: dict[str, list[str]],
     metadata: dict[str, str],
-) -> dict[str, int]:
+) -> ResolveImport:
     """
     Full Resolve import for one shoot. Serialised behind the module lock.
 
     Imports everything in the organised folder structure — both clips that were
     moved in this ingest run (via clip_paths) AND any clips already in place from
     a prior run. import_clips() deduplicates against what Resolve already has, so
-    this is safe to call repeatedly.
+    this is safe to call repeatedly; a re-run also fills in any blank metadata on
+    clips already there.
 
-    Returns: { "a_cam": N, "c_cam": N, "photos": N, "assets": N, "total": N }
+    Returns counts { "a_cam": N, "c_cam": N, "photos": N, "assets": N, "total": N }
+    and any metadata fields Resolve refused.
     """
     _acquire_lock()
     try:
@@ -250,15 +325,16 @@ def ingest_into_resolve(
         mp = project.GetMediaPool()
         bins = build_bin_tree(mp)
 
+        # Start timecode isn't written: Resolve reads it from the file itself.
         clip_meta = {
-            "Camera": metadata.get("camera", ""),
-            "Lens": metadata.get("lens", ""),
-            "Timecode Start": metadata.get("timecode_start", ""),
-            "Shoot Date": metadata.get("shoot_date", ""),
+            "Camera Type": metadata.get("camera", ""),
+            "Lens Type": metadata.get("lens", ""),
+            "Date Recorded": metadata.get("shoot_date", ""),
             "Cairn Stage": "ingested",
         }
 
         counts: dict[str, int] = {}
+        refused: set[str] = set()
 
         # Union of newly-moved clips + clips already in organised dirs so that
         # re-ingesting an already-organised folder still populates Resolve fully.
@@ -266,22 +342,15 @@ def ingest_into_resolve(
             return list(set(clip_paths.get(key, []) + _scan_dir(directory, exts)))
 
         a_cam_paths = _union("a_cam", folder / "01_VIDEOS" / "A_CAM", _VIDEO_EXTS)
-        a_cam_clips = import_clips(mp, bins["a_cam"], a_cam_paths)
-        counts["a_cam"] = len(a_cam_clips)
-        for clip in a_cam_clips:
-            set_clip_metadata(clip, clip_meta)
+        counts["a_cam"] = _import_and_tag(mp, bins["a_cam"], a_cam_paths, clip_meta, refused)
 
         c_cam_paths = _union("c_cam", folder / "01_VIDEOS" / "C_CAM", _VIDEO_EXTS)
-        c_cam_clips = import_clips(mp, bins["c_cam"], c_cam_paths)
-        counts["c_cam"] = len(c_cam_clips)
-        for clip in c_cam_clips:
-            set_clip_metadata(clip, clip_meta)
+        counts["c_cam"] = _import_and_tag(mp, bins["c_cam"], c_cam_paths, clip_meta, refused)
 
         photo_paths = _union("photos", folder / "02_PHOTOS", _PHOTO_EXTS)
-        photo_clips = import_clips(mp, bins["photos"], photo_paths, stills=True)
-        counts["photos"] = len(photo_clips)
-        for clip in photo_clips:
-            set_clip_metadata(clip, clip_meta)
+        counts["photos"] = _import_and_tag(
+            mp, bins["photos"], photo_paths, clip_meta, refused, stills=True
+        )
 
         asset_clips = import_clips(mp, bins["assets"], clip_paths.get("assets", []))
         counts["assets"] = len(asset_clips)
@@ -291,8 +360,58 @@ def ingest_into_resolve(
         counts["thumbnails"] = len(thumb_clips)
 
         counts["total"] = sum(counts.values())
-        return counts
+        return ResolveImport(counts, sorted(refused))
 
+    finally:
+        _release_lock()
+
+
+def ingest_offload_into_resolve(
+    shoot_folder: str | Path,
+    camera_clips: dict[str, list[str]],
+    photo_paths: list[str],
+    metadata: dict[str, str],
+) -> ResolveImport:
+    """
+    Resolve import for an Offload shoot (Footage/<Camera> layout), in place.
+
+    Bins mirror the folders: Cairn/Footage/<Camera> per camera folder, plus
+    Cairn/Photos. Same dedup (and blank-metadata fill-in) as ingest_into_resolve,
+    so safe to re-run when a second card lands in the same shoot.
+
+    Returns counts { "<camera>": N, ..., "photos": N, "total": N } and any
+    metadata fields Resolve refused. Each bin's clips get that camera folder's
+    name as Camera Type: the folder is the camera, the shoot's manifest only names one.
+    """
+    _acquire_lock()
+    try:
+        project = get_resolve().GetProjectManager().GetCurrentProject()
+        if project is None:
+            raise ResolveUnavailableError(
+                "No DaVinci Resolve project is open. Open a project before ingesting."
+            )
+        mp = project.GetMediaPool()
+        cairn = find_or_create_bin(mp, mp.GetRootFolder(), "Cairn")
+        footage = find_or_create_bin(mp, cairn, "Footage")
+
+        counts: dict[str, int] = {}
+        refused: set[str] = set()
+        for camera, paths in camera_clips.items():
+            clip_meta = {
+                "Camera Type": camera,
+                "Date Recorded": metadata.get("shoot_date", ""),
+                "Cairn Stage": "ingested",
+            }
+            counts[camera] = _import_and_tag(
+                mp, find_or_create_bin(mp, footage, camera), paths, clip_meta, refused
+            )
+
+        if photo_paths:
+            photos_bin = find_or_create_bin(mp, cairn, "Photos")
+            counts["photos"] = len(import_clips(mp, photos_bin, photo_paths, stills=True))
+
+        counts["total"] = sum(counts.values())
+        return ResolveImport(counts, sorted(refused))
     finally:
         _release_lock()
 
@@ -338,10 +457,9 @@ _LABEL_FLAG: dict[str, str] = {
     "AMBIGUOUS": "Yellow",
 }
 
-# Custom metadata key for our classification. Resolve's built-in "Keywords"
-# column is NOT writable via SetMetadata — that key is reserved by the media
-# pool's tagging system and SetMetadata silently returns False on it. Use a
-# custom key so the value actually persists and shows up in the Metadata pane.
+# Custom key for our classification, stored as third-party metadata (see
+# set_clip_metadata: SetMetadata refuses any key that isn't a Resolve field).
+# The editor sees the label as the clip colour and flag.
 CAIRN_CLASSIFICATION_KEY: str = "Cairn Classification"
 
 
@@ -403,13 +521,12 @@ def classify_write_resolve(clip_path: str, label: str) -> tuple[bool, str | None
             print(f"[resolve_api] classify_write_resolve: {reason}", file=sys.stderr)
             return False, reason
 
-        # 1. Custom metadata — Resolve's built-in "Keywords" column is read-only
-        # via SetMetadata, so we use our own key. SetMetadata returns False on
-        # any failure (bad key, locked clip, etc.). Check it.
-        meta_ok = bool(clip.SetMetadata(CAIRN_CLASSIFICATION_KEY, label))
+        # 1. Cairn's own key, as third-party metadata. Returns False on any
+        # failure (locked clip, etc.). Check it.
+        meta_ok = not set_clip_metadata(clip, {CAIRN_CLASSIFICATION_KEY: label})
         if not meta_ok:
             print(
-                f"[resolve_api] SetMetadata({CAIRN_CLASSIFICATION_KEY!r}, {label!r}) "
+                f"[resolve_api] SetThirdPartyMetadata({CAIRN_CLASSIFICATION_KEY!r}, {label!r}) "
                 f"returned False for {clip_path}",
                 file=sys.stderr,
             )
@@ -475,8 +592,13 @@ def set_keywords(clip_path: str, keywords: str) -> bool:
         clip = get_clip_by_path(mp, clip_path)
         if clip is None:
             return False
-        set_clip_metadata(clip, {"Keywords": keywords, "Cairn Stage": "indexed"})
-        return True
+        refused = set_clip_metadata(clip, {"Keywords": keywords, "Cairn Stage": "indexed"})
+        if refused:
+            print(
+                f"[resolve_api] set_keywords: Resolve refused {refused} for {clip_path}",
+                file=sys.stderr,
+            )
+        return "Keywords" not in refused
     except ResolveUnavailableError:
         return False
     finally:
@@ -736,7 +858,8 @@ def add_subtitle_track(clip_path: str, srt_path: str) -> bool:
             # AddSubTitle not available on this Resolve version — best-effort fallback
             attached = False
 
-        set_clip_metadata(clip, {"Cairn Stage": "transcribed"})
+        if set_clip_metadata(clip, {"Cairn Stage": "transcribed"}):
+            print(f"[resolve_api] Resolve refused 'Cairn Stage' for {clip_path}", file=sys.stderr)
         return attached
     except ResolveUnavailableError:
         return False

@@ -51,6 +51,18 @@ def test_classified_clips_groups_by_label(tmp_path: Path) -> None:
     assert bins["AMBIGUOUS"] == ["/foo/c03.mp4"]
 
 
+def test_classified_clips_reads_offload_shoot_sidecars(tmp_path: Path) -> None:
+    # Offload shoots keep clip sidecars beside offload.json, not in 04_EXPORT.
+    cairn = tmp_path / ".cairn"
+    cairn.mkdir()
+    (cairn / "offload.json").write_text(json.dumps({"camera": "FX30"}))
+    _write_sidecar(cairn, "aaa", classification="B-ROLL", source_path="/s/Footage/FX30/C0001.MP4")
+
+    bins = timeline._classified_clips(tmp_path)
+
+    assert bins["B-ROLL"] == ["/s/Footage/FX30/C0001.MP4"]
+
+
 def test_classified_clips_skips_unclassified_sidecars(tmp_path: Path) -> None:
     cairn = tmp_path / "04_EXPORT" / ".cairn"
     _write_sidecar(

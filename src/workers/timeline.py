@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import resolve_api
+import sidecar
 
 # ── Sidecar reading ───────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ def _classified_clips(shoot_folder: Path) -> dict[str, list[str]]:
     included. Each list is sorted by source_path so order is deterministic.
     """
     bins: dict[str, list[str]] = {"A-ROLL": [], "B-ROLL": [], "AMBIGUOUS": []}
-    cairn_dir = shoot_folder / "04_EXPORT" / ".cairn"
+    cairn_dir = sidecar.sidecar_root(shoot_folder)  # <shoot>/.cairn for Offload shoots
     if not cairn_dir.is_dir():
         return bins
 

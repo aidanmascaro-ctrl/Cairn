@@ -288,158 +288,6 @@ async function getResolveSnapshot() {
   }
 }
 
-// ── Resolve media pool helpers ────────────────────────────────────────────────
-
-const VIDEO_EXTS = new Set([".mp4", ".mov", ".mxf", ".avi", ".m2ts"]);
-const PHOTO_EXTS = new Set([".arw", ".jpg", ".jpeg", ".dng", ".cr2", ".cr3", ".nef", ".raf"]);
-
-/**
- * Return absolute paths of all files in dirPath whose extension is in exts.
- * @param {string} dirPath
- * @param {Set<string>} exts
- * @returns {string[]}
- */
-function scanDir(dirPath, exts) {
-  try {
-    if (!fs.existsSync(dirPath)) return [];
-    return fs
-      .readdirSync(dirPath)
-      .filter((name) => exts.has(path.extname(name).toLowerCase()))
-      .map((name) => path.join(dirPath, name));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Spawn resolve_import.py as a separate process with a hard kill timeout.
- * Returns the number of clips imported, or throws on failure/timeout.
- * @param {string} folder
- * @returns {Promise<number>}
- */
-function importViaResolveScript(folder) {
-  return new Promise((resolve, reject) => {
-    const scriptPath = path.join(__dirname, "..", "workers", "resolve_import.py");
-    const proc = require("node:child_process").spawn(getPythonPath(), [scriptPath, folder], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    const timer = setTimeout(() => {
-      proc.kill("SIGKILL");
-      reject(new Error("resolve_import.py timed out (120 s) — Resolve scripting may be blocked"));
-    }, 120_000);
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => {
-      stdout += d.toString();
-    });
-    proc.stderr.on("data", (d) => {
-      process.stderr.write(`[resolve_import] ${d}`);
-      stderr += d.toString();
-    });
-    proc.on("exit", () => {
-      clearTimeout(timer);
-      try {
-        const result = JSON.parse(stdout.trim());
-        if (result.ok) {
-          resolve(result.count);
-        } else {
-          // Include traceback if present so the UI can show the real cause
-          const msg = result.error ?? "resolve_import.py returned ok:false";
-          reject(new Error(result.traceback ? `${msg}\n${result.traceback}` : msg));
-        }
-      } catch {
-        // stdout was not JSON — the script crashed before writing anything
-        const detail =
-          stderr.trim().split("\n").slice(-3).join(" | ") || stdout.trim() || "no output";
-        reject(new Error(`resolve_import.py crash: ${detail}`));
-      }
-    });
-  });
-}
-
-/**
- * Import the organised shoot folder into Resolve's media pool.
- *
- * Strategy 1 — Python Scripting API subprocess (preferred):
- *   Spawns resolve_import.py which calls mp.ImportMedia([folder]) via the
- *   full Python Scripting API. This supports recursive folder import with bin
- *   structure, identical to dragging the folder into the media pool manually.
- *   The subprocess is killed after 15 s if it hangs.
- *
- * Strategy 2 — JS flat import (fallback):
- *   If Python fails, import individual file paths directly via the JS
- *   WorkflowIntegration API into Master (no bin structure, but clips land).
- *
- * @param {object} ingestResult
- * @param {Electron.WebContents} sender
- * @param {string} msgId
- * @returns {Promise<{total: number}|null>}
- */
-async function importFolderToResolve(ingestResult, sender, msgId) {
-  const folder = ingestResult.folder;
-  let total = 0;
-
-  // ── Strategy 1: Python Scripting API (creates proper bin structure) ──────
-  // Mirrors the drag-and-drop behavior: pass the folder to ImportMedia with
-  // Master as the active bin so Resolve creates bins matching the filesystem.
-  // Requires Resolve → Preferences → General → External scripting: Local.
-  let pythonFailReason = null;
-  try {
-    total = await importViaResolveScript(folder);
-  } catch (err) {
-    pythonFailReason = err.message;
-    process.stderr.write(`[cairn] Python Resolve import failed: ${err.message}\n`);
-  }
-
-  // ── Strategy 2: JS flat import (fallback — no bin structure) ─────────────
-  // Only runs if Python failed. Clips land in Master without bins.
-  // User must enable "External scripting: Local" in Resolve to get bins.
-  if (total === 0) {
-    const resolveObj = await getResolve();
-    const pm = resolveObj ? await resolveObj.GetProjectManager() : null;
-    const project = pm ? await pm.GetCurrentProject() : null;
-    const mp = project ? await project.GetMediaPool() : null;
-
-    if (mp) {
-      const mediaPaths = [
-        ...scanDir(path.join(folder, "01_VIDEOS", "A_CAM"), VIDEO_EXTS),
-        ...scanDir(path.join(folder, "01_VIDEOS", "B_CAM"), VIDEO_EXTS),
-        ...scanDir(path.join(folder, "01_VIDEOS", "C_CAM"), VIDEO_EXTS),
-        ...scanDir(path.join(folder, "02_PHOTOS"), PHOTO_EXTS),
-      ];
-      if (mediaPaths.length) {
-        const imported = await mp.ImportMedia(mediaPaths);
-        total = imported ? imported.length : 0;
-        if (total > 0 && pythonFailReason && sender && !sender.isDestroyed()) {
-          // Tell the user WHY they got flat import instead of bins
-          sender.send("cairn:ingest:progress", {
-            id: msgId,
-            type: "ingest_progress",
-            event: "resolve_flat_import",
-            reason: pythonFailReason,
-            count: total,
-          });
-        }
-      }
-    }
-  }
-
-  if (sender && !sender.isDestroyed()) {
-    sender.send("cairn:ingest:progress", {
-      id: msgId,
-      type: "ingest_progress",
-      event: total > 0 ? "resolve_imported" : "resolve_skipped",
-      ...(total > 0
-        ? { total }
-        : { reason: pythonFailReason ?? "No media files found to import." }),
-    });
-  }
-
-  return { total };
-}
-
 // ── Key storage (safeStorage + encrypted JSON file) ──────────────────────────
 // safeStorage uses the OS keychain to derive an encryption key, then stores
 // the encrypted bytes in a file we manage. No native addon required.
@@ -539,7 +387,72 @@ async function validateKey(type, key) {
   return { valid: false, error: "Unknown key type" };
 }
 
+// ── Offload inbox ─────────────────────────────────────────────────────────────
+// The Offload menu-bar app (offload/ in this repo) copies + verifies a card, then
+// appends the shoot to this inbox. Cairn lists them as "ready to sort" and drops
+// the entry once the shoot has been ingested.
+
+function offloadInboxPath() {
+  return path.join(app.getPath("appData"), "Cairn", "offload-inbox.json");
+}
+
+function readOffloadInbox() {
+  let raw;
+  try {
+    raw = fs.readFileSync(offloadInboxPath(), "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
+  }
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error("Offload inbox is not a list.");
+  return parsed.filter(
+    (e) => e && typeof e.shoot_folder === "string" && typeof e.manifest === "string",
+  );
+}
+
+function readJsonOrNull(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function summariseOffloadShoot(entry) {
+  // Drive unplugged → manifest unreadable. Keep the entry, just mark it unavailable.
+  const manifest = readJsonOrNull(entry.manifest);
+  return {
+    shoot_folder: entry.shoot_folder,
+    added_at: typeof entry.added_at === "string" ? entry.added_at : null,
+    available: manifest !== null,
+    client: manifest?.client ?? "",
+    shoot_name: manifest?.shoot_name ?? path.basename(entry.shoot_folder),
+    camera: manifest?.camera ?? "",
+    date: manifest?.date ?? "",
+    file_count: Array.isArray(manifest?.files) ? manifest.files.length : 0,
+  };
+}
+
 function registerIpc() {
+  ipcMain.handle("cairn:offload:inbox", () => readOffloadInbox().map(summariseOffloadShoot));
+
+  ipcMain.handle("cairn:offload:done", (_event, shootFolder) => {
+    if (typeof shootFolder !== "string" || shootFolder.length === 0) {
+      throw new Error("offload:done needs a shoot folder path.");
+    }
+    const entries = readOffloadInbox();
+    const remaining = entries.filter((e) => e.shoot_folder !== shootFolder);
+    if (remaining.length === entries.length) return false;
+    // ponytail: read-modify-write without a lock; Offload could append in the same
+    // instant and lose that entry. Re-copying the card re-adds it. Add a lock file if it bites.
+    const target = offloadInboxPath();
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(remaining, null, 2));
+    fs.renameSync(tmp, target);
+    return true;
+  });
+
   ipcMain.handle("cairn:dialog:open-folder", async () => {
     // Pass mainWindow as parent so the sheet appears attached to the plugin
     // window rather than hiding behind DaVinci Resolve.
@@ -729,101 +642,42 @@ function registerIpc() {
   });
 
   ipcMain.handle("cairn:ingest", async (event, payload) => {
-    // Python handles file organisation; Resolve import is done here via the JS
-    // WorkflowIntegration API (Python Scripting API hangs from a plugin subprocess).
-    const pythonPayload = { ...payload, resolve: false };
-
+    // The single Python bridge worker does BOTH the filesystem organisation AND
+    // the Resolve media-pool import (Cairn bin tree, per-clip metadata, dedup)
+    // in one streamed call. It is the ONLY process that touches the Resolve
+    // Scripting API — Taste Invariant #3: serialise all Resolve calls through a
+    // single worker. We never spawn a second Resolve-scripting process; a
+    // concurrent second connection deadlocks the non-thread-safe API from inside
+    // the plugin sandbox (the old resolve_import.py fallback did exactly that).
     const sendProgress = (obj) => {
       if (!event.sender.isDestroyed()) event.sender.send("cairn:ingest:progress", obj);
     };
 
-    // ── Python organisation (45 s hard timeout) ───────────────────────────────
-    // send2trash and rglob on large external drives can stall indefinitely.
-    // If Python times out we skip organisation and still attempt Resolve import.
-    let result = null;
+    // Organisation (rglob / send2trash) can stall on large external drives and
+    // the per-photo ImportMedia loop adds time, so the budget is generous. The
+    // bridge streams progress throughout and fails fast (resolve_skipped) when
+    // Resolve is unreachable, so this hard cap only bites a genuine hang.
     try {
-      result = await Promise.race([
-        callPython(
-          { type: "ingest", payload: pythonPayload },
-          {
-            timeoutMs: 45_000,
-            onProgress: (progressEvent) => sendProgress(progressEvent),
-          },
-        ),
-        new Promise((_res, rej) =>
-          setTimeout(
-            () => rej(new Error("Organisation timed out (45 s) — skipping to Resolve import")),
-            45_000,
-          ),
-        ),
-      ]);
-    } catch (err) {
-      sendProgress({
-        type: "ingest_progress",
-        event: "org_skipped",
-        reason: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Build a minimal result from payload if Python didn't complete
-    if (!result || result.type !== "ingest_complete") {
-      result = {
-        type: "ingest_complete",
-        folder: payload.path,
-        files_moved: 0,
-        shells_removed: 0,
-        metadata: {},
-        clip_paths: { a_cam: [], c_cam: [], photos: [], assets: [] },
-        resolve_counts: {},
-        dry_run: payload.dry_run ?? false,
-      };
-    }
-
-    // ── Resolve import fallback ──────────────────────────────────────────────
-    // The bridge (bridge.py handle_ingest -> resolve_api.ingest_into_resolve)
-    // is the primary Resolve-import path. It builds the Cairn bin tree, sets
-    // per-clip metadata, and dedupes against what's already imported. We only
-    // fall back to resolve_import.py (which would create a SECOND parallel bin
-    // tree under <shoot_folder>/...) when the bridge couldn't reach Resolve at
-    // all — that's signalled by resolve_counts being empty AND no clips imported.
-    if (!payload.dry_run) {
-      const bridgeTotal =
-        (result.resolve_counts?.a_cam ?? 0) +
-        (result.resolve_counts?.c_cam ?? 0) +
-        (result.resolve_counts?.photos ?? 0);
-
-      const bridgeImported =
-        result.resolve_counts && Object.keys(result.resolve_counts).length > 0 && bridgeTotal > 0;
-
-      if (!bridgeImported) {
-        const msgId = "";
-        try {
-          const resolveCounts = await Promise.race([
-            importFolderToResolve(result, event.sender, msgId),
-            new Promise((_res, rej) =>
-              setTimeout(() => rej(new Error("Resolve import timed out (150 s)")), 150_000),
-            ),
-          ]);
-          if (resolveCounts) {
-            result.resolve_counts = resolveCounts;
-          } else {
-            sendProgress({
-              type: "ingest_progress",
-              event: "resolve_skipped",
-              reason: "WorkflowIntegration not available — install the plugin into Resolve.",
-            });
-          }
-        } catch (err) {
-          sendProgress({
-            type: "ingest_progress",
-            event: "resolve_skipped",
-            reason: err instanceof Error ? err.message : String(err),
-          });
-        }
+      const result = await callPython(
+        { type: "ingest", payload: { ...payload, resolve: true } },
+        {
+          timeoutMs: 300_000,
+          onProgress: (progressEvent) => sendProgress(progressEvent),
+        },
+      );
+      // The bridge sends a terminal { type: "error", message } (not
+      // ingest_complete) if organisation or the Resolve import threw. callPython
+      // RESOLVES with that message rather than rejecting, so guard explicitly and
+      // surface it as a failure instead of returning a hollow "done" result.
+      if (!result || result.type !== "ingest_complete") {
+        throw new Error(result?.message ?? "Ingest did not complete.");
       }
+      return result;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      sendProgress({ type: "ingest_progress", event: "ingest_error", reason });
+      throw err instanceof Error ? err : new Error(reason);
     }
-
-    return result;
   });
 
   // ── Stage 5: Selects ───────────────────────────────────────────────────────
