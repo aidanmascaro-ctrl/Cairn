@@ -48,6 +48,14 @@ public struct CardSession: Identifiable, Hashable, Sendable {
     }
 }
 
+extension SessionPlan {
+    /// How many sessions still have any of `missing` in them: shoots not fully on the drive.
+    public func sessionsHolding(_ missing: [MediaFile]) -> Int {
+        let left = Set(missing.map(\.url))
+        return sessions.filter { $0.files.contains { left.contains($0.url) } }.count
+    }
+}
+
 /// Splits a card into sessions. State is just "where new sessions start" (cuts into the
 /// time-sorted list of clips/photos), so merge and split are toggles on that set.
 public struct SessionPlan: Sendable {

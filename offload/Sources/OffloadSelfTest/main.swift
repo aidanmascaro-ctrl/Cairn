@@ -185,6 +185,41 @@ func samplesClipsAcrossTheSession() throws {
            "three clips spread through the session")
     expect(session.sidecar(of: session.previewClips[1])?.url.lastPathComponent == "C0004M01.XML", "a clip's own XML")
     expect(session.sidecar(of: session.previewClips[0]) == nil, "none when the card has no XML for it")
+
+    // Two shoots a day apart; one is on the drive, the other half copied.
+    let later = MediaFile(url: card.appendingPathComponent("M4ROOT/CLIP/C0100.MP4"), size: 1,
+                          created: Date(timeIntervalSince1970: 1_800_100_000))
+    let two = SessionPlan(files: files + [later])
+    expect(two.sessions.count == 2 && two.sessionsHolding([later]) == 1, "only the shoot with files left counts")
+    expect(two.sessionsHolding([]) == 0, "none once everything's copied")
+}
+
+func remembersFingerprintsBetweenLaunches() throws {
+    let dir = try tempDir()
+    let store = dir.appendingPathComponent("fingerprints.plist")
+    let clip = try write(Array(repeating: 7, count: 3 << 20), to: dir.appendingPathComponent("C0001.MP4"))
+    var reads = 0
+    let read = { () -> Data? in reads += 1; return DriveIndex.fingerprint(clip.url, size: clip.size) }
+
+    let first = FingerprintCache(location: store)
+    let fresh = first.fingerprint(of: clip.url, size: clip.size, compute: read)
+    _ = first.fingerprint(of: clip.url, size: clip.size, compute: read)
+    first.save()
+    let relaunched = FingerprintCache(location: store)
+    expect(relaunched.fingerprint(of: clip.url, size: clip.size, compute: read) == fresh && reads == 1,
+           "read once, remembered after a relaunch")
+
+    try Data(repeating: 8, count: 3 << 20).write(to: clip.url)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: clip.url.path)
+    let changed = relaunched.fingerprint(of: clip.url, size: clip.size, compute: read)
+    expect(reads == 2 && changed != fresh, "a file changed since is read again")
+
+    // The drive check finds the same copies with the cache as without it.
+    let card = try tempDir(), drive = try tempDir()
+    let onCard = try write(Array(repeating: 3, count: 4096), to: card.appendingPathComponent("C0002.MP4"))
+    _ = try write(Array(repeating: 3, count: 4096), to: drive.appendingPathComponent("Shoot/C0002.MP4"))
+    let cached = DriveIndex(root: drive, cache: FingerprintCache(location: dir.appendingPathComponent("other.plist")))
+    expect(cached.contains(onCard) && DriveIndex(root: drive).contains(onCard), "same answer with the cache")
 }
 
 func copiesVerifiesAndNeverOverwrites() throws {
@@ -1013,6 +1048,7 @@ for (name, test) in [
     ("matchesByContentNotName", { try matchesByContentNotName() }),
     ("resumesHalfCopiedShootMovedAroundTheCard", { try resumesHalfCopiedShootMovedAroundTheCard() }),
     ("copiesVerifiesAndNeverOverwrites", { try copiesVerifiesAndNeverOverwrites() }),
+    ("remembersFingerprintsBetweenLaunches", { try remembersFingerprintsBetweenLaunches() }),
     ("turnsSLog3IntoRec709", { turnsSLog3IntoRec709() }),
     ("picksASharpWellExposedFrame", { picksASharpWellExposedFrame() }),
     ("samplesClipsAcrossTheSession", { try samplesClipsAcrossTheSession() }),

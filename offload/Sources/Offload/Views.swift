@@ -167,6 +167,13 @@ struct CardRow: View {
     }
 
     /// Files of a type Offload doesn't know aren't copied — say so, so nothing is lost on format.
+    /// "2 of 3 shoots aren't fully on Lexar 4TB yet." — or "This shoot isn't…" for one.
+    private var shootsLeft: String {
+        let (left, total) = (card.sessionsLeft, card.sessionCount)
+        if total <= 1 { return "This shoot isn't fully on \(model.driveName) yet." }
+        return "\(left) of \(total) shoots \(left == 1 ? "isn't" : "aren't") fully on \(model.driveName) yet."
+    }
+
     @ViewBuilder private var unknownNote: some View {
         if !card.unknown.isEmpty {
             let list = card.unknown.sorted { $0.value > $1.value }.map { "\($0.value) \($0.key)" }.joined(separator: ", ")
@@ -202,14 +209,10 @@ struct CardRow: View {
             if !card.blockers.isEmpty { blockerList }
             handoffLink
         case .ready:
-            Text("\(card.missing.count) of \(card.files.count) files aren't on \(model.driveName) yet."
-                 + (card.isPhone ? " Tick the sessions you want." : " Don't format."))
+            Text(shootsLeft + (card.isPhone ? " Tick the sessions you want." : " Don't format."))
                 .font(.callout)
+                .help("\(card.missing.count) of \(card.files.count) files aren't on \(model.driveName) yet")
             unknownNote
-            if card.sessionCount > 1 {
-                Text("Looks like \(card.sessionCount) separate shoots on this card.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             HStack {
                 Spacer()
                 Button("Folder", action: chooseFolder)

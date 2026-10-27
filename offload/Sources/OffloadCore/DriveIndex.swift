@@ -5,14 +5,17 @@ import Foundation
 ///
 /// Files are first grouped by exact byte size, then compared by a quick fingerprint
 /// (SHA-256 of the first and last 1 MB). That makes the count appear in seconds even on
-/// a 200 GB card. The full-file check happens when copying (see `Copier`).
+/// a 200 GB card. The full-file check happens when copying (see `Copier`). With a `cache`,
+/// fingerprints worked out on an earlier launch aren't read again.
 public final class DriveIndex {
     static let sampleBytes = 1 << 20
 
     private var bySize: [Int64: [URL]] = [:]
     private var fingerprints: [URL: Data] = [:]
+    private let cache: FingerprintCache?
 
-    public init(root: URL) {
+    public init(root: URL, cache: FingerprintCache? = nil) {
+        self.cache = cache
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey]
         guard let walker = FileManager.default.enumerator(
             at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
@@ -31,7 +34,7 @@ public final class DriveIndex {
     /// Every file on the drive with the same content as `file` — where it was copied to before.
     public func copies(of file: MediaFile) -> [URL] {
         guard let candidates = bySize[file.size],
-              let wanted = Self.fingerprint(file.url, size: file.size)
+              let wanted = remembered(file.url, size: file.size)
         else { return [] }
         return candidates.filter { fingerprint(of: $0, size: file.size) == wanted }
     }
@@ -47,9 +50,14 @@ public final class DriveIndex {
 
     private func fingerprint(of url: URL, size: Int64) -> Data? {
         if let cached = fingerprints[url] { return cached }
-        let value = Self.fingerprint(url, size: size)
+        let value = remembered(url, size: size)
         fingerprints[url] = value
         return value
+    }
+
+    private func remembered(_ url: URL, size: Int64) -> Data? {
+        guard let cache else { return Self.fingerprint(url, size: size) }
+        return cache.fingerprint(of: url, size: size) { Self.fingerprint(url, size: size) }
     }
 
     static func fingerprint(_ url: URL, size: Int64) -> Data? {

@@ -65,6 +65,8 @@ final class CardState: ObservableObject, Identifiable {
     @Published var lastShoot: URL?
     /// How many separate shooting sessions are on the card (3h gap rule).
     @Published var sessionCount = 1
+    /// How many of them still have files that aren't on the drive.
+    @Published var sessionsLeft = 0
     @Published var ejecting = false
     @Published var ejectError: String?
     /// Who is holding the card open, filled in when an eject fails.
@@ -498,15 +500,20 @@ final class AppModel: ObservableObject {
             let camera = phone ? PhoneSource.camera(on: volume, files: files) : CameraInfo.read(fromCard: volume, files: files)
             if !phone { CardLog.record(volume: volume, camera: camera, files: files, unknown: unknown) }
             // Content match against the whole working drive, so footage filed anywhere counts.
-            let index = driveVolume.map { DriveIndex(root: $0) }
+            // Fingerprints from earlier launches are reused, so a card seen before checks fast.
+            let index = driveVolume.map { DriveIndex(root: $0, cache: .shared) }
             let copies = files.reduce(into: [URL: [URL]]()) { found, file in
                 let onDrive = index?.copies(of: file) ?? []
                 if !onDrive.isEmpty { found[file.url] = onDrive }
             }
+            FingerprintCache.shared.save()
             let missing = files.filter { copies[$0.url] == nil }
-            let sessionCount = SessionPlan(files: files).sessions.count
+            let sessionPlan = SessionPlan(files: files)
+            let sessionCount = sessionPlan.sessions.count
+            let sessionsLeft = sessionPlan.sessionsHolding(missing)
             await MainActor.run {
                 card.sessionCount = sessionCount
+                card.sessionsLeft = sessionsLeft
                 card.files = files
                 card.camera = camera
                 card.unknown = unknown
@@ -561,12 +568,13 @@ final class AppModel: ObservableObject {
                     // everything) — there, only the folder holding this client's shoots.
                     let isInternal = (try? volume.resourceValues(forKeys: [.volumeIsInternalKey]).volumeIsInternal) ?? false
                     let scope = isInternal ? job.plan.shootFolder.deletingLastPathComponent().deletingLastPathComponent() : volume
-                    let index = indexes[scope] ?? DriveIndex(root: scope)
+                    let index = indexes[scope] ?? DriveIndex(root: scope, cache: .shared)
                     indexes[scope] = index
                     let files = index.missing(from: job.files)
                     return files.isEmpty ? nil : CopyJob(plan: job.plan, files: files, client: job.client,
                                                          shootName: job.shootName, date: job.date, camera: job.camera)
                 }
+                FingerprintCache.shared.save()
                 await MainActor.run {
                     guard let self else { return }
                     if filtered.isEmpty { self.scan(card) } else { self.copy(card, jobs: filtered, checkedOtherDrives: true) }
