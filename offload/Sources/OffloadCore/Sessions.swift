@@ -29,6 +29,23 @@ public struct CardSession: Identifiable, Hashable, Sendable {
         let stem = SessionPlan.stem(middle.url)
         return files.first { $0.kind == .thumbnail && SessionPlan.ownerStem($0.url) == stem } ?? middle
     }
+
+    /// Clips a quarter, half and three quarters of the way through, by time: frames from
+    /// these are compared to find a good preview.
+    public var previewClips: [MediaFile] {
+        let clips = files.filter { $0.kind == .video }.sorted { $0.created < $1.created }
+        guard !clips.isEmpty else { return [] }
+        let picks = [clips.count / 4, clips.count / 2, clips.count * 3 / 4].map { clips[$0] }
+        return picks.enumerated().filter { i, clip in !picks.prefix(i).contains(clip) }.map(\.element)
+    }
+
+    /// The camera's XML for `clip` (C0004.MP4 -> C0004M01.XML), which says how it was shot.
+    public func sidecar(of clip: MediaFile) -> MediaFile? {
+        let stem = SessionPlan.stem(clip.url)
+        return files.first {
+            $0.kind == .metadata && $0.url.pathExtension.lowercased() == "xml" && SessionPlan.ownerStem($0.url) == stem
+        }
+    }
 }
 
 /// Splits a card into sessions. State is just "where new sessions start" (cuts into the

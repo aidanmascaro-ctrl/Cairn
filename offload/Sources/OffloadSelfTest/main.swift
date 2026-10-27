@@ -138,6 +138,55 @@ func matchesByContentNotName() throws {
     expect(!index.contains(lookalike), "!index.contains(lookalike)")  // same size, different tail
 }
 
+func turnsSLog3IntoRec709() {
+    let xml = #"<Item name="CaptureGammaEquation" value="s-log3-cine"/><Item name="CaptureColorPrimaries" value="s-gamut3-cine"/>"#
+    guard let look = LogLook(sonyXML: xml) else { return expect(false, "S-Log3 clip XML gives a look") }
+    expect(LogLook(sonyXML: #"<Item name="CaptureGammaEquation" value="rec709"/>"#) == nil, "a Rec.709 clip is left as it is")
+    func grey(_ code: UInt8) -> UInt8 { look.applied(to: Frame(width: 1, height: 1, pixels: [code, code, code, 255])).pixels[0] }
+    // 18% grey is S-Log3 code 420/1023 (105 of 255) and Rec.709 41% (104 of 255).
+    expect(abs(Int(grey(105)) - 104) <= 2, "mid grey lands at Rec.709 mid grey")
+    expect(grey(24) <= 2, "S-Log3 black is black")
+    expect(grey(250) >= 250, "the top of S-Log3 is white")
+    let tint = look.applied(to: Frame(width: 1, height: 1, pixels: [150, 150, 150, 255])).pixels
+    expect(Set(tint.prefix(3)).count == 1, "greys stay grey")
+}
+
+func picksASharpWellExposedFrame() {
+    func frame(_ w: Int, _ h: Int, _ value: (Int, Int) -> UInt8) -> Frame {
+        var pixels: [UInt8] = []
+        for y in 0..<h { for x in 0..<w { let v = value(x, y); pixels += [v, v, v, 255] } }
+        return Frame(width: w, height: h, pixels: pixels)
+    }
+    let sharp = frame(64, 36) { x, y in (x / 2 + y / 2) % 2 == 0 ? 40 : 200 }
+    let soft = frame(64, 36) { x, _ in UInt8(40 + x * 2) }
+    let dark = frame(64, 36) { x, y in (x / 2 + y / 2) % 2 == 0 ? 0 : 20 }
+    expect(FramePick.score(sharp) > FramePick.score(soft), "detail beats blur")
+    expect(FramePick.score(sharp) > FramePick.score(dark), "a near-black frame loses")
+
+    // Black bars either side (pillarbox) and above/below (letterbox) are cropped off.
+    let barred = frame(64, 36) { x, y in x < 8 || x >= 56 || y < 4 ? 0 : 120 }
+    let rect = FramePick.contentRect(barred)
+    expect(rect == FramePick.Rect(x: 8, y: 4, width: 48, height: 32), "black bars found")
+    expect(FramePick.cropped(barred, to: rect).width == 48, "and cropped off")
+    let dim = frame(64, 36) { _, _ in 24 }  // S-Log3 shadows sit above true black: kept
+    expect(FramePick.contentRect(dim) == FramePick.Rect(x: 0, y: 0, width: 64, height: 36), "dark footage isn't cropped")
+}
+
+func samplesClipsAcrossTheSession() throws {
+    let card = try tempDir()
+    var files: [MediaFile] = []
+    for i in 0..<8 {
+        let clip = try write([1], to: card.appendingPathComponent("M4ROOT/CLIP/C000\(i).MP4"))
+        files.append(MediaFile(url: clip.url, size: 1, created: Date(timeIntervalSince1970: Double(1_800_000_000 + i * 60))))
+        if i == 4 { files.append(try write([2], to: card.appendingPathComponent("M4ROOT/CLIP/C0004M01.XML"))) }
+    }
+    let session = SessionPlan(files: files).sessions[0]
+    expect(session.previewClips.map(\.url.lastPathComponent) == ["C0002.MP4", "C0004.MP4", "C0006.MP4"],
+           "three clips spread through the session")
+    expect(session.sidecar(of: session.previewClips[1])?.url.lastPathComponent == "C0004M01.XML", "a clip's own XML")
+    expect(session.sidecar(of: session.previewClips[0]) == nil, "none when the card has no XML for it")
+}
+
 func copiesVerifiesAndNeverOverwrites() throws {
     let card = try tempDir(), root = try tempDir()
     let file = try write([1, 2, 3, 4], to: card.appendingPathComponent("DCIM/C0001.MP4"))
@@ -151,6 +200,27 @@ func copiesVerifiesAndNeverOverwrites() throws {
     expect(try Data(contentsOf: plan.footageFolder.appendingPathComponent("C0001.MP4")) == Data([9]), "try Data(contentsOf: plan.footageFolder.appendingPathComponent('C0001.MP4')) == Data([9])")
     expect(try Data(contentsOf: copied[0].destination) == Data([1, 2, 3, 4]), "try Data(contentsOf: copied[0].destination) == Data([1, 2, 3, 4])")
     expect(try Data(contentsOf: file.url) == Data([1, 2, 3, 4]), "try Data(contentsOf: file.url) == Data([1, 2, 3, 4])")  // card untouched
+}
+
+func keepsOriginalsOfEditedClips() throws {
+    // C0381.MP4 was rotated on the drive: same clip (same shot time), different bytes. The
+    // card's untouched clip goes in Originals/, the rotated one stays put.
+    let card = try tempDir(), root = try tempDir()
+    let fm = FileManager.default
+    let clip = try write([1, 2, 3, 4], to: card.appendingPathComponent("M4ROOT/CLIP/C0381.MP4"))
+    let other = try write([5, 6], to: card.appendingPathComponent("M4ROOT/CLIP/C0382.MP4"))
+    let plan = ShootPlan(root: root, client: "C", shootName: "S", date: Date(), camera: "A7S III", hasPhotos: false)
+    try plan.create(project: false)
+    let rotated = try write([9, 9, 9], to: plan.footageFolder.appendingPathComponent("C0381.MP4"))
+    try fm.setAttributes([.creationDate: clip.created], ofItemAtPath: rotated.url.path)
+    _ = try write([7], to: plan.footageFolder.appendingPathComponent("C0382.MP4"))  // another clip, shot another time
+
+    let copied = try Copier.copy([clip, other], plan: plan) { _ in }
+    expect(copied.map { $0.destination.path.dropFirst(plan.footageFolder.path.count + 1) } == ["Originals/C0381.MP4", "C0382 (2).MP4"],
+           "an edited clip's original goes in Originals; a different clip with the name still gets (2)")
+    expect(try Data(contentsOf: rotated.url) == Data([9, 9, 9]), "the rotated clip is left alone")
+    expect(try Data(contentsOf: copied[0].destination) == Data([1, 2, 3, 4]), "the original is copied whole")
+    expect(ShootTidy.plan(plan.shootFolder).fileCount == 0, "Sort leaves Originals where they are")
 }
 
 func sameNamedFilesBothSurviveBackToBack() throws {
@@ -943,6 +1013,10 @@ for (name, test) in [
     ("matchesByContentNotName", { try matchesByContentNotName() }),
     ("resumesHalfCopiedShootMovedAroundTheCard", { try resumesHalfCopiedShootMovedAroundTheCard() }),
     ("copiesVerifiesAndNeverOverwrites", { try copiesVerifiesAndNeverOverwrites() }),
+    ("turnsSLog3IntoRec709", { turnsSLog3IntoRec709() }),
+    ("picksASharpWellExposedFrame", { picksASharpWellExposedFrame() }),
+    ("samplesClipsAcrossTheSession", { try samplesClipsAcrossTheSession() }),
+    ("keepsOriginalsOfEditedClips", { try keepsOriginalsOfEditedClips() }),
     ("sameNamedFilesBothSurviveBackToBack", { try sameNamedFilesBothSurviveBackToBack() }),
     ("handoffWritesSidecarAndInbox", { try handoffWritesSidecarAndInbox() }),
     ("photoOnlyShootDropsEmptyFootageAndProject", { try photoOnlyShootDropsEmptyFootageAndProject() }),

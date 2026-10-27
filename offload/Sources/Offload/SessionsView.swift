@@ -157,7 +157,7 @@ struct SessionRow: View {
 
     private static let previewSize = CGSize(width: 192, height: 108)   // 16:9
 
-    /// Middle clip of the session, so you can tell the shoots apart at a glance.
+    /// A good frame from the session, so you can tell the shoots apart at a glance.
     private var preview: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary)
@@ -169,7 +169,7 @@ struct SessionRow: View {
         }
         .frame(width: Self.previewSize.width, height: Self.previewSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .help(session.middleShot.map { "Middle clip: \($0.url.lastPathComponent)" } ?? "")
+        .help("The sharpest frame from a few clips in this session")
     }
 
     private var details: String {

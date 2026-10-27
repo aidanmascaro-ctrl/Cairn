@@ -183,7 +183,7 @@ final class SessionDraft: ObservableObject, Identifiable {
     /// Files in this session that aren't on the drive yet.
     let missing: [MediaFile]
     @Published var skip: Bool
-    /// Middle clip of the session, loaded in the background.
+    /// A good frame from the session, loaded in the background.
     @Published var thumbnail: NSImage?
     var id: Int { session.id }
 
@@ -197,9 +197,9 @@ final class SessionDraft: ObservableObject, Identifiable {
     }
 
     private func loadThumbnail() {
-        guard let file = session.preview else { return }
+        let session = session
         Task.detached(priority: .utility) { [weak self] in
-            let image = await Thumbnailer.image(for: file)
+            let image = await Thumbnailer.image(for: session)
             await MainActor.run { self?.thumbnail = image }
         }
     }

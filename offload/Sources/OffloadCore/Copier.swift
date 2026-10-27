@@ -69,7 +69,9 @@ public enum CopyError: Error, LocalizedError {
 /// Each file is hashed while it streams to a hidden `.part` file, then the written file is
 /// read back from the drive (bypassing the memory cache) and hashed again. Only a matching
 /// copy is renamed into place, so an interrupted or failed copy never looks finished.
-/// Existing files are never overwritten.
+/// Existing files are never overwritten. A clip edited on the drive (rotated in Finder: same
+/// shot, re-saved without Sony's metadata) keeps its place; the card's untouched clip goes
+/// in Originals/ beside it.
 ///
 /// Speed: the card is read on its own thread while the drive writes, and each file's
 /// read-back check runs while the next file copies, so neither device waits on the other.
@@ -105,7 +107,10 @@ public enum Copier {
             let folder = plan.destinationFolder(for: file)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             // The file still being checked hasn't been renamed yet, so its name is reserved.
-            let dest = uniqueDestination(for: file.url.lastPathComponent, in: folder, reserved: checking?.dest)
+            let named = folder.appendingPathComponent(file.url.lastPathComponent)
+            let target = isEdit(named, of: file) ? folder.appendingPathComponent(originalsFolder, isDirectory: true) : folder
+            if target != folder { try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true) }
+            let dest = uniqueDestination(for: file.url.lastPathComponent, in: target, reserved: checking?.dest)
             let written = try write(file, toPartFor: dest) { bytes in
                 progress.bytesDone += bytes
                 onProgress(progress)
@@ -115,6 +120,19 @@ public enum Copier {
         }
         try finishChecking()
         return copied
+    }
+
+    /// Where the card's untouched clip goes when the drive holds an edit of it.
+    static let originalsFolder = "Originals"
+
+    /// Whether `existing` is `file` edited on the drive: a clip of the same name shot at the
+    /// same second (a rotate keeps the file's created date). Only reached when the bytes
+    /// differ, since clips already on the drive aren't copied again. A different clip that
+    /// shares the name was shot at another time, so it still gets " (2)".
+    static func isEdit(_ existing: URL, of file: MediaFile) -> Bool {
+        guard file.kind == .video, file.created != .distantPast,
+              let created = (try? existing.resourceValues(forKeys: [.creationDateKey]))?.creationDate else { return false }
+        return abs(created.timeIntervalSince(file.created)) < 1
     }
 
     /// Streams `file` into `.<name>.part` next to `dest` and starts its read-back check.
