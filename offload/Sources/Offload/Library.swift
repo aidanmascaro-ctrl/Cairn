@@ -170,7 +170,8 @@ final class LibraryModel: ObservableObject {
     private func writeNote() {
         guard let notePath else { return }
         do {
-            try catalog.markdown(mappedDrives: mappedDrives(besideNote: notePath))
+            try catalog.markdown(mappedDrives: mappedDrives(besideNote: notePath),
+                                 hiddenClients: untickedFolders(besideNote: notePath))
                 .write(toFile: notePath, atomically: true, encoding: .utf8)
             noteError = nil
         } catch {
@@ -178,11 +179,22 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    /// Drives with a folder map in the "Drive Directory" folder next to the catalog note.
+    /// The "Drive Directory" folder next to the catalog note.
+    private func driveDirectory(besideNote notePath: String) -> URL {
+        URL(fileURLWithPath: notePath).deletingLastPathComponent().appendingPathComponent("Drive Directory")
+    }
+
+    /// Drives with a folder map in the Drive Directory.
     private func mappedDrives(besideNote notePath: String) -> Set<String> {
-        let folder = URL(fileURLWithPath: notePath).deletingLastPathComponent().appendingPathComponent("Drive Directory")
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: driveDirectory(besideNote: notePath).path)) ?? []
         return Set(catalog.drives.map(\.name).filter { files.contains(Catalog.mapNote(for: $0) + ".md") })
+    }
+
+    /// Folders the Drive Directory marks as not holding work shoots (none if it has no categories note).
+    private func untickedFolders(besideNote notePath: String) -> Set<String> {
+        let note = driveDirectory(besideNote: notePath).appendingPathComponent("Folder categories.md")
+        guard let text = try? String(contentsOf: note, encoding: .utf8) else { return [] }
+        return Catalog.untickedFolders(inNote: text)
     }
 
     /// Confirmed clients on plugged-in drives, with their confirmed shoot folders — so New

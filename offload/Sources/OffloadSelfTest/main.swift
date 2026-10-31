@@ -560,6 +560,16 @@ func catalogsDrivesAndAsksAboutUnknownShoots() throws {
     let linked = catalog.markdown(mappedDrives: ["Samsung T7"])
     expect(linked.contains("[[Drive Directory]]") && linked.contains("| [[Drive - Samsung T7\\|Samsung T7]] | Home shelf |")
            && !note.contains("[[Drive Directory]]"), "drives with a folder map link to it")
+    let unticked = Catalog.untickedFolders(inNote: """
+        ## Client work
+        - [x] ACME #work — [[Drive - T7|T7]] · 1 GB
+        - [ ] ORBIT #work — [[Drive - T7|T7]] · 2 GB
+        - [ ] Odd #name #personal
+        """)
+    expect(unticked == ["orbit", "odd #name"], "unticked folders are read from the categories note")
+    let workOnly = catalog.markdown(hiddenClients: ["acme"])
+    expect(!workOnly.contains("## ACME") && workOnly.contains("| Samsung T7 | Home shelf |"),
+           "unticked folders are left out of the catalog")
 
     let file = drive.appendingPathComponent("catalog.json")
     try catalog.save(to: file)

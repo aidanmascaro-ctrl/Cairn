@@ -244,8 +244,10 @@ public struct Catalog: Codable, Sendable, Equatable {
 
     /// The catalog as a Markdown note: one table per client (most recent client first),
     /// then the drives. Drives named in `mappedDrives` have a folder map note
-    /// ("Drive - <name>", from the Drive Directory) and are linked to it.
-    public func markdown(updated: Date = Date(), mappedDrives: Set<String> = []) -> String {
+    /// ("Drive - <name>", from the Drive Directory) and are linked to it. Shoots whose client
+    /// folder is in `hiddenClients` (lowercased) are left out — see `untickedFolders(inNote:)`.
+    public func markdown(updated: Date = Date(), mappedDrives: Set<String> = [],
+                         hiddenClients: Set<String> = []) -> String {
         let stamp = DateFormatter()
         stamp.dateFormat = "d MMM yyyy, h:mm a"
         var lines = [
@@ -259,7 +261,7 @@ public struct Catalog: Codable, Sendable, Equatable {
         func driveCell(_ name: String) -> String {
             mappedDrives.contains(name) ? "[[\(Self.mapNote(for: name))\\|\(Self.cell(name))]]" : Self.cell(name)
         }
-        let shoots = shoots
+        let shoots = shoots.filter { !hiddenClients.contains($0.client.lowercased()) }
         var clientNames: [String] = []
         for shoot in shoots where !clientNames.contains(shoot.client) { clientNames.append(shoot.client) }
         for client in clientNames {
@@ -279,6 +281,22 @@ public struct Catalog: Codable, Sendable, Equatable {
                 + "\(seen.string(from: drive.lastSeen)) |")
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Folders left unticked in the Drive Directory's "Folder categories" note, lowercased.
+    /// Each folder is a line like `- [ ] PERSONAL #personal — drives · size`; a tick means
+    /// "holds work shoots", so unticked folders stay out of the catalog.
+    public static func untickedFolders(inNote text: String) -> Set<String> {
+        var names = Set<String>()
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("- [ ] ") else { continue }
+            var rest = String(line.dropFirst(6))
+            if let dash = rest.range(of: " — ") { rest = String(rest[..<dash.lowerBound]) }
+            guard let tag = rest.range(of: " #", options: .backwards) else { continue }
+            names.insert(rest[..<tag.lowerBound].lowercased())
+        }
+        return names
     }
 
     /// The Drive Directory's note name for a drive's folder map.
