@@ -170,11 +170,19 @@ final class LibraryModel: ObservableObject {
     private func writeNote() {
         guard let notePath else { return }
         do {
-            try catalog.markdown().write(toFile: notePath, atomically: true, encoding: .utf8)
+            try catalog.markdown(mappedDrives: mappedDrives(besideNote: notePath))
+                .write(toFile: notePath, atomically: true, encoding: .utf8)
             noteError = nil
         } catch {
             noteError = "Couldn't update the Obsidian note: \(error.localizedDescription)"
         }
+    }
+
+    /// Drives with a folder map in the "Drive Directory" folder next to the catalog note.
+    private func mappedDrives(besideNote notePath: String) -> Set<String> {
+        let folder = URL(fileURLWithPath: notePath).deletingLastPathComponent().appendingPathComponent("Drive Directory")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return Set(catalog.drives.map(\.name).filter { files.contains(Catalog.mapNote(for: $0) + ".md") })
     }
 
     /// Confirmed clients on plugged-in drives, with their confirmed shoot folders — so New

@@ -557,6 +557,9 @@ func catalogsDrivesAndAsksAboutUnknownShoots() throws {
     let note = catalog.markdown()
     expect(note.contains("## ACME") && note.contains("| 261013 | Spring launch | FX3 |")
            && note.contains("| Samsung T7 | Home shelf |"), "Obsidian note has client and drive tables")
+    let linked = catalog.markdown(mappedDrives: ["Samsung T7"])
+    expect(linked.contains("[[Drive Directory]]") && linked.contains("| [[Drive - Samsung T7\\|Samsung T7]] | Home shelf |")
+           && !note.contains("[[Drive Directory]]"), "drives with a folder map link to it")
 
     let file = drive.appendingPathComponent("catalog.json")
     try catalog.save(to: file)

@@ -243,8 +243,9 @@ public struct Catalog: Codable, Sendable, Equatable {
     // MARK: Obsidian note
 
     /// The catalog as a Markdown note: one table per client (most recent client first),
-    /// then the drives.
-    public func markdown(updated: Date = Date()) -> String {
+    /// then the drives. Drives named in `mappedDrives` have a folder map note
+    /// ("Drive - <name>", from the Drive Directory) and are linked to it.
+    public func markdown(updated: Date = Date(), mappedDrives: Set<String> = []) -> String {
         let stamp = DateFormatter()
         stamp.dateFormat = "d MMM yyyy, h:mm a"
         var lines = [
@@ -252,6 +253,12 @@ public struct Catalog: Codable, Sendable, Equatable {
             "Written by Offload — \(stamp.string(from: updated)). Edits here are overwritten; drive notes are set in Offload.",
             "",
         ]
+        if !mappedDrives.isEmpty {
+            lines += ["Every folder on each drive: [[Drive Directory]].", ""]
+        }
+        func driveCell(_ name: String) -> String {
+            mappedDrives.contains(name) ? "[[\(Self.mapNote(for: name))\\|\(Self.cell(name))]]" : Self.cell(name)
+        }
         let shoots = shoots
         var clientNames: [String] = []
         for shoot in shoots where !clientNames.contains(shoot.client) { clientNames.append(shoot.client) }
@@ -260,7 +267,7 @@ public struct Catalog: Codable, Sendable, Equatable {
             for shoot in shoots where shoot.client == client {
                 lines.append("| \(shoot.date.flatMap(Self.shortDate) ?? "—") | \(Self.cell(shoot.name)) | "
                     + "\(Self.cell(shoot.cameras.joined(separator: ", "))) | \(Self.size(shoot.bytes)) | "
-                    + "\(Self.cell(drive(shoot.driveID)?.name ?? "?")) |")
+                    + "\(drive(shoot.driveID).map { driveCell($0.name) } ?? "?") |")
             }
             lines.append("")
         }
@@ -268,11 +275,14 @@ public struct Catalog: Codable, Sendable, Equatable {
         let seen = DateFormatter()
         seen.dateFormat = "d MMM yyyy"
         for drive in drives.sorted(by: { $0.name < $1.name }) {
-            lines.append("| \(Self.cell(drive.name)) | \(Self.cell(drive.note)) | \(drive.free.map(Self.size) ?? "—") | "
+            lines.append("| \(driveCell(drive.name)) | \(Self.cell(drive.note)) | \(drive.free.map(Self.size) ?? "—") | "
                 + "\(seen.string(from: drive.lastSeen)) |")
         }
         return lines.joined(separator: "\n") + "\n"
     }
+
+    /// The Drive Directory's note name for a drive's folder map.
+    public static func mapNote(for driveName: String) -> String { "Drive - \(driveName)" }
 
     private static func cell(_ text: String) -> String { text.replacingOccurrences(of: "|", with: "\\|") }
 
