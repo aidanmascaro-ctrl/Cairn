@@ -21,7 +21,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { execFile, execFileSync, exec } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -440,6 +440,40 @@ function main() {
     res.end(json);
   }
 
+  // Read a JSON request body with a hard size cap, then parse safely. Guards the
+  // localhost dev endpoints against malformed bodies (an unguarded JSON.parse
+  // previously crashed the server) and against unbounded memory use.
+  const MAX_BODY_BYTES = 64 * 1024;
+  function readJsonBody(req, res, onJson) {
+    let body = "";
+    let aborted = false;
+    const abort = (status, error) => {
+      if (aborted) return;
+      aborted = true;
+      send(res, status, { error });
+      req.destroy();
+    };
+    req.on("data", (d) => {
+      if (aborted) return;
+      body += d;
+      // Cap by byte length (not UTF-16 string length) so multibyte payloads
+      // can't slip past the limit.
+      if (Buffer.byteLength(body) > MAX_BODY_BYTES) abort(413, "Request body too large");
+    });
+    req.on("error", () => abort(400, "Request stream error"));
+    req.on("end", () => {
+      if (aborted) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        send(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+      onJson(parsed);
+    });
+  }
+
   const server = http.createServer((req, res) => {
     const { pathname } = new URL(req.url, `http://localhost:${PORT}`);
 
@@ -506,12 +540,13 @@ function main() {
 
     // ── Label a clip
     if (req.method === "POST" && pathname === "/api/label") {
-      let body = "";
-      req.on("data", (d) => {
-        body += d;
-      });
-      req.on("end", () => {
-        const { label } = JSON.parse(body);
+      readJsonBody(req, res, (parsed) => {
+        const VALID_LABELS = ["A-ROLL", "B-ROLL", "SKIP"];
+        const label = typeof parsed?.label === "string" ? parsed.label : null;
+        if (!label || !VALID_LABELS.includes(label)) {
+          send(res, 400, { error: "Invalid 'label' (expected A-ROLL, B-ROLL, or SKIP)" });
+          return;
+        }
         const clip = currentClip();
 
         if (clip && label !== "SKIP") {
@@ -540,14 +575,18 @@ function main() {
 
     // ── Open in Finder (macOS: reveal file)
     if (req.method === "POST" && pathname === "/api/open-finder") {
-      let body = "";
-      req.on("data", (d) => {
-        body += d;
-      });
-      req.on("end", () => {
-        const { path: clipPath } = JSON.parse(body);
-        // open -R reveals the file in Finder without launching the default app
-        exec(`open -R ${JSON.stringify(clipPath)}`);
+      readJsonBody(req, res, (parsed) => {
+        const clipPath = typeof parsed?.path === "string" ? parsed.path : null;
+        if (!clipPath) {
+          send(res, 400, { error: "Missing or invalid 'path'" });
+          return;
+        }
+        // open -R reveals the file in Finder without launching the default app.
+        // execFile (not exec) passes clipPath as a literal argv entry, so shell
+        // metacharacters in the path can never be interpreted as a command.
+        execFile("open", ["-R", clipPath], (err) => {
+          if (err) console.error(`[trainer] open -R failed: ${err.message}`);
+        });
         send(res, 200, { ok: true });
       });
       return;
@@ -573,7 +612,9 @@ function main() {
     console.log("─".repeat(48));
     console.log(`\nOpening ${url} …\n`);
 
-    exec(`open ${url}`);
+    execFile("open", [url], (err) => {
+      if (err) console.error(`[trainer] could not open browser: ${err.message}`);
+    });
   });
 }
 
