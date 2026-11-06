@@ -149,7 +149,9 @@ def offload_camera_dirs(folder: str | Path, manifest: dict | None = None) -> dic
     footage = Path(folder) / "Footage"
     if footage.is_dir():
         return {
-            d.name: d for d in sorted(footage.iterdir()) if d.is_dir() and not d.name.startswith(".")
+            d.name: d
+            for d in sorted(footage.iterdir())
+            if d.is_dir() and not d.name.startswith(".")
         }
     manifest = manifest if manifest is not None else read_offload_manifest(folder)
     footage_dir = Path(manifest.get("footage_folder") or folder)
