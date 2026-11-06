@@ -241,7 +241,7 @@ Use for running `npm test`, `pytest`, `ruff check`, `pyrefly check`, ffmpeg comm
 | `mcp-builder`       | MCP surfaces         | If we later expose plugin functions via MCP to other tools              |
 | `skill-creator`     | New project skills   | Domain skills specific to this plugin (e.g. Resolve marker conventions) |
 | `security-review`   | Key handling, auth   | Before shipping any release — audit for key exposure                    |
-| `verification-loop` | Pre-release          | Full end-to-end test on the sample project                     |
+| `verification-loop` | Pre-release          | Full end-to-end test on the sample project                              |
 | `simplify`          | After large features | Post-Stage review sweeps                                                |
 
 ---
