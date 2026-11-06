@@ -145,11 +145,25 @@ Each entry:
 
 ## Security follow-ups (repo went public 2026-11-06)
 
-- [ ] **Plan an Electron upgrade.** Electron 30 is out of support and `npm audit` flags it. It is a dev dependency here, but the jump to 45 is breaking and must be validated against Resolve's plugin host. `electron-builder` needs a major bump too.
-- [ ] **Clear the remaining dev-tool audit findings.** Production dependencies are clean; 36 findings remain in dev tooling (`vite` has no direct fix yet).
-- [ ] **Re-enable ASAR with integrity** in `packaging/electron-builder.json5` once Electron is upgraded.
-- [ ] **Add a strict CSP to `src/ui/index.html`.**
-- [ ] **Extend path validation.** Apply `ingest.py`'s `preflight()` checks to the classify and build-timeline handlers.
+- [x] **Electron upgrade.** `electron` 45 and `electron-builder` 26. Both are dev and build tools: Resolve runs plugins on its own bundled Electron (36.3.2 in Resolve 21.1.2), so upgrading ours does not change the runtime on a user's machine. See "Plugin host" in `AGENT.md`.
+- [x] **Reduce dev-tool audit findings.** 36 down to 8 (1 high, 6 moderate, 1 low); production dependencies still clean. `minimatch` and `brace-expansion` are held by `overrides` in `package.json`.
+- [x] **ASAR with integrity** in `packaging/electron-builder.json5`. Windows package only. See its limits below.
+- [x] **Strict CSP** in `src/ui/index.html`, relaxed only for the Vite dev server.
+- [x] **Path validation** on `classify`, `classify_confirm` and `build_timeline`. `preflight()` also now catches Windows paths and a bare `/System`, which it used to miss. Rejections now show in the UI instead of looking like "0 clips".
+- [ ] **Confirm in Resolve itself.** Install this build, restart Resolve, open Workspace → Workflow Integrations → Cairn, and check the project name appears, then run a classify and a timeline build. `tools/check-plugin-host.mjs` runs the plugin on Resolve's Electron, but the addon's handshake only succeeds when Resolve launched the process.
+- [ ] **Remaining 8 audit findings need Svelte 5.** All come from `vite` 5, `svelte` 4 and `@sveltejs/vite-plugin-svelte` 3. A newer Vite needs a newer plugin, which needs Svelte 5, so this is a UI migration. Dev server and build tooling only.
+- [ ] **Windows installer probably can't register with Resolve.** A trial `--win --dir` build puts `manifest.xml` inside `resources/app.asar`, and with `asar: false` it would sit in `resources/app/`. Resolve expects it at the plugin root, and it also expects `FilePath` to resolve from there. Needs a Windows machine to fix and test. It also ships Electron's `Cairn.exe`, which Resolve doesn't launch, and leaves out `assets/bin/ffmpeg`.
+- [ ] **ASAR integrity isn't enforced under Resolve.** Resolve's Electron has the integrity fuse off and we can't change it. The fuses we set only cover `Cairn.exe`. The Mac plugin (`build-mac.sh`) is a plain folder with no ASAR, so its protection is code signing and notarization.
+- [ ] **Validate the remaining paths.** `classify_inspect` and `cairn:classify:thumbnail` take a clip file, not a folder, so `preflight()` doesn't fit them as is. The `selects_*` handlers use the weaker `_shoot()` check.
+
+## Ported from `chore/repo-hygiene-and-docs` (2026-11-06)
+
+`packaging/workers.spec`, `pytest.ini` and the `numpy` requirement are ported. A real PyInstaller build on macOS (Python 3.14, 57 MB) classified a test clip inside the bundle; Windows is not built. These follow-ups from that branch still apply:
+
+- [ ] **`sidecar.clip_id` hashes the absolute path,** so renaming a shoot folder orphans its sidecars on re-ingest.
+- [ ] **Split `src/orchestrator/main.js` and `src/workers/resolve_api.py`,** and give `timeline.py` a public lock instead of `_acquire_lock`.
+- [ ] **Move the duplicated file-extension sets** into one `src/workers/constants.py`.
+- [ ] **Add `tests/python/test_bridge.py`** for the handlers not covered by `test_path_validation.py`.
 
 ---
 

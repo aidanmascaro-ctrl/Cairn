@@ -33,6 +33,7 @@
   let progressLines: string[] = [];
   let classifyResult: ClassifyResult | null = null;
   let errorMsg = "";
+  let confirmError = "";
 
   interface AmbiguousClip {
     path: string;
@@ -81,6 +82,7 @@
     classifyResult = null;
     ambiguousClips = [];
     errorMsg = "";
+    confirmError = "";
     clipErrors = [];
     resolveFailCount = 0;
     sidecarFailCount = 0;
@@ -156,6 +158,7 @@
     const idx = ambiguousClips.findIndex((c) => c.path === clipPath);
     if (idx === -1) return;
     ambiguousClips = ambiguousClips.map((c, i) => (i === idx ? { ...c, confirming: true } : c));
+    confirmError = "";
     try {
       const result = await cairn.classify.confirm({
         clip_path: clipPath,
@@ -176,7 +179,8 @@
         resolveFailCount++;
         if (result.resolve_reason) lastResolveReason = result.resolve_reason;
       }
-    } catch {
+    } catch (err) {
+      confirmError = err instanceof Error ? err.message : String(err);
       ambiguousClips = ambiguousClips.map((c, i) => (i === idx ? { ...c, confirming: false } : c));
     }
   }
@@ -208,6 +212,7 @@
     classifyResult = null;
     ambiguousClips = [];
     errorMsg = "";
+    confirmError = "";
     total = 0;
     processed = 0;
     clipErrors = [];
@@ -358,6 +363,10 @@
       </div>
     {:else if resolvedCount > 0}
       <p class="all-resolved">✓ All {String(resolvedCount)} ambiguous clips resolved</p>
+    {/if}
+
+    {#if confirmError}
+      <p class="error-msg">✗ {confirmError}</p>
     {/if}
 
     <button class="reset-btn" on:click={reset}>Re-classify</button>

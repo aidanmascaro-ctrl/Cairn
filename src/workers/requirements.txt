@@ -1,2 +1,4 @@
 send2trash>=2.1.0
-opencv-python-headless>=4.9.0
+# OpenCV 5 drops cv2.CascadeClassifier, which classify.py needs for face detection.
+opencv-python-headless>=4.9.0,<5
+numpy>=1.24

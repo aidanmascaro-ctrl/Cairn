@@ -57,22 +57,26 @@ function getPythonPath() {
  * Returns the path to the PyInstaller-bundled workers binary, or null if not
  * present (dev mode — fall back to getPythonPath() + getBridgeScriptPath()).
  *
- * Production layout inside the plugin folder:
- *   resources/workers          macOS
- *   resources/workers.exe      Windows
+ * Production layouts:
+ *   <plugin>/resources/workers          macOS plugin folder (build-mac.sh)
+ *   <resources>/workers.exe             Windows, beside app.asar (electron-builder)
+ *
+ * The Windows path is worked out from __dirname, not process.resourcesPath:
+ * inside Resolve the latter points at Resolve's private Electron, not at Cairn.
  *
  * Dev convenience: if `npm run package:python` was run, the binary lands at
  *   packaging/dist/workers[.exe] relative to the project root.
  */
 function getWorkersPath() {
-  const ext = process.platform === "win32" ? ".exe" : "";
-  // Production: <plugin>/resources/workers[.exe]
-  const prod = path.join(__dirname, "..", "..", "resources", `workers${ext}`);
-  if (fs.existsSync(prod)) return prod;
-  // Dev build: <project>/packaging/dist/workers[.exe]
-  const dev = path.join(__dirname, "..", "..", "packaging", "dist", `workers${ext}`);
-  if (fs.existsSync(dev)) return dev;
-  return null;
+  const binary = `workers${process.platform === "win32" ? ".exe" : ""}`;
+  // Packaged as ASAR, __dirname is <resources>/app.asar/src/orchestrator. Outside
+  // an archive that same path would be the folder above the plugin, so never look there.
+  const asarDir = path.join(__dirname, "..", "..");
+  const candidates =
+    path.basename(asarDir) === "app.asar"
+      ? [path.join(path.dirname(asarDir), binary)]
+      : [path.join(asarDir, "resources", binary), path.join(asarDir, "packaging", "dist", binary)];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 function getFfmpegPath() {
@@ -158,6 +162,12 @@ function ensurePythonWorker() {
  * @param {{ onProgress?: (e: object) => void, timeoutMs?: number }} [opts]
  * @returns {Promise<object>}
  */
+/** Turns a `{type:"error"}` bridge reply into a thrown Error the UI can show. */
+function throwIfBridgeError(reply) {
+  if (reply?.type === "error") throw new Error(reply.message ?? "Python bridge error");
+  return reply;
+}
+
 function callPython(msg, opts = {}) {
   ensurePythonWorker();
   const id = randomUUID();
@@ -568,7 +578,8 @@ function registerIpc() {
   });
 
   ipcMain.handle("cairn:classify:confirm", async (_event, payload) => {
-    return callPython({ type: "classify_confirm", payload }, { timeoutMs: 30_000 });
+    const reply = await callPython({ type: "classify_confirm", payload }, { timeoutMs: 30_000 });
+    return throwIfBridgeError(reply);
   });
 
   ipcMain.handle("cairn:classify:inspect", async (_event, payload) => {
@@ -614,17 +625,21 @@ function registerIpc() {
         event: "classify_error",
         reason: err instanceof Error ? err.message : String(err),
       });
-      return { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
+      throw err; // A timeout or crash must not look like "0 clips classified".
     }
 
-    return result ?? { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 };
+    // A rejected folder (see ingest.preflight) must not look like "0 clips classified".
+    return (
+      throwIfBridgeError(result) ?? { a_roll: 0, b_roll: 0, ambiguous: 0, skipped: 0, total: 0 }
+    );
   });
 
   ipcMain.handle("cairn:timeline:build", async (_event, payload) => {
     // Timeline assembly is a single Resolve transaction — no streaming.
     // 60 s is plenty even on hundreds of clips since AppendToTimeline is bulk.
     try {
-      return await callPython({ type: "build_timeline", payload }, { timeoutMs: 60_000 });
+      const reply = await callPython({ type: "build_timeline", payload }, { timeoutMs: 60_000 });
+      return throwIfBridgeError(reply);
     } catch (err) {
       return {
         ok: false,

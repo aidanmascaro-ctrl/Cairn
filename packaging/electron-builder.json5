@@ -17,7 +17,8 @@
   productName: "Cairn",
   copyright: "Copyright © 2026 Aidan Mascaro",
 
-  // Include only plugin files — no bundled Electron runtime.
+  // Include only plugin files. electron-builder still adds its own Electron
+  // runtime (Cairn.exe); Resolve runs the plugin on its private Electron instead.
   // WorkflowIntegration.node is Resolve's own native addon; it must already
   // be present in src/orchestrator/ (copied by install-dev-plugin.sh).
   files: [
@@ -53,7 +54,20 @@
     },
   ],
 
-  asar: false,
+  // WorkflowIntegration.node must load from a real file; electron-builder keeps
+  // native addons out of the archive automatically, this states it explicitly.
+  asar: true,
+  asarUnpack: ["src/orchestrator/WorkflowIntegration.node"],
+
+  // Cairn.exe only. Resolve runs plugins on its own Electron, whose integrity
+  // fuse is off, so these do not protect the plugin when run from Resolve.
+  electronFuses: {
+    enableEmbeddedAsarIntegrityValidation: true,
+    onlyLoadAppFromAsar: true,
+    runAsNode: false,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+  },
 
   directories: {
     output: "packaging/release/win",
@@ -67,16 +81,19 @@
         arch: ["x64"],
       },
     ],
-    signingHashAlgorithms: ["sha256"],
-    // certificateFile + certificatePassword read from env by electron-builder
-    certificateFile: "${env.WIN_CERT_PATH}",
-    certificatePassword: "${env.WIN_CERT_PASSWORD}",
+    // electron-builder 26 moved signing options under signtoolOptions.
+    signtoolOptions: {
+      signingHashAlgorithms: ["sha256"],
+      // certificateFile + certificatePassword read from env by electron-builder
+      certificateFile: "${env.WIN_CERT_PATH}",
+      certificatePassword: "${env.WIN_CERT_PASSWORD}",
+    },
   },
 
   nsis: {
     oneClick: false,
     perMachine: true,
-    allowDirChange: false,
+    allowToChangeInstallationDirectory: false,
     createDesktopShortcut: false,
     createStartMenuShortcut: false,
     // Custom macro overrides $INSTDIR to Resolve's plugin folder.

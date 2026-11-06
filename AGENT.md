@@ -36,6 +36,16 @@ Short entries grouped by area. No essays. If something needs a paragraph of cont
 - **Stage 4 timeline assembly (`timeline.py`):** `MediaPool.CreateEmptyTimeline(name)` makes the new timeline current automatically; `mp.AppendToTimeline(clips)` lands video on V1, audio on A1. To put B-roll on V2/A2: call `timeline.AddTrack("video")` + `AddTrack("audio")` to create the destination tracks, then `timeline.SetTrackLock("video", 1, True)` + `SetTrackLock("audio", 1, True)` so the next AppendToTimeline routes to V2/A2. Unlock V1/A1 afterwards. Both AddTrack and SetTrackLock are wrapped in `contextlib.suppress` since older Resolve versions may not expose them.
 - **Project framerate is global** — `project.SetSetting("timelineFrameRate", "23.976")` works only if no timeline yet exists at a different fps. After the first timeline, the project rate is locked. `timeline.py` records a warning when SetSetting returns False and proceeds with whatever fps the project has.
 
+## Plugin host
+
+- **Resolve brings its own Electron:** `DaVinci Resolve.app/Contents/Applications/.hidden/Electron.app`, 36.3.2 as of Resolve 21.1.2 (Node 22). The `electron` in `package.json` only runs `npm start` and builds the Windows package. Keep `main.js` and `preload.js` working on both versions, and check this version after Resolve updates.
+- **`WorkflowIntegration.node` uses N-API,** so it loads across Electron versions without a rebuild. Confirmed on 36.3.2 and 45.2.3.
+- **Smoke test:** `node tools/check-plugin-host.mjs` runs the real `main.js` on Resolve's Electron (needs `npm run build:ui`, and the addon copied by `npm run install-plugin`). Pass `--electron <path>` or `--app <folder or app.asar>` to vary it. It opens a Cairn window for a few seconds.
+- **"Failed to initialize communication with host" is expected from that test.** The addon's IPC only connects when Resolve launched the process, so a real handshake has to be tested from the Workflow Integrations menu.
+- **Resolve's Electron fuses:** ASAR integrity and only-load-from-ASAR are off, so packaging can't enforce them there. `process.resourcesPath` points inside Resolve; find plugin files from `__dirname`.
+- **Electron downloads lazily:** `npm install` may not fetch the binary. The first `require("electron")` or `npx electron` does.
+- **OpenCV 5 has no `cv2.CascadeClassifier`,** which fails every clip in classify. `requirements.txt` pins `<5`.
+
 ## Python workers
 
 - **System Python:** 3.14.3 at `/Library/Frameworks/Python.framework/Versions/3.14/bin/python3`. CLAUDE.md target is 3.11+; 3.14 is ahead. Flag in `fix_plan.md` if `silero-vad`, `faster-whisper`, or `pyrefly` wheels aren't published for 3.14 — we may need to pin to 3.12 via `pyenv` or ship our own runtime via PyInstaller.
