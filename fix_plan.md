@@ -143,6 +143,16 @@ Each entry:
 
 ---
 
+## Security follow-ups (repo went public 2026-11-06)
+
+- [ ] **Plan an Electron upgrade.** Electron 30 is out of support and `npm audit` flags it. It is a dev dependency here, but the jump to 45 is breaking and must be validated against Resolve's plugin host. `electron-builder` needs a major bump too.
+- [ ] **Clear the remaining dev-tool audit findings.** Production dependencies are clean; 36 findings remain in dev tooling (`vite` has no direct fix yet).
+- [ ] **Re-enable ASAR with integrity** in `packaging/electron-builder.json5` once Electron is upgraded.
+- [ ] **Add a strict CSP to `src/ui/index.html`.**
+- [ ] **Extend path validation.** Apply `ingest.py`'s `preflight()` checks to the classify and build-timeline handlers.
+
+---
+
 ## Resolved
 
 ### DaVinci import did nothing / showed an error after ingest
