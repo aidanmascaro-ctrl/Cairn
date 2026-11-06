@@ -65,3 +65,15 @@ src/orchestrator/WorkflowIntegration.node
 
 # graphify knowledge graph (regenerated — do not commit)
 graphify-out/
+
+# Claude Code local settings and session notes (never public)
+.claude/
+handoffs/
+
+# Private keys and signing certificates
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision

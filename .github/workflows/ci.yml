@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# CI only reads the repo; give its token nothing else.
+permissions:
+  contents: read
+
 jobs:
   node:
     name: Node checks
