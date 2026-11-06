@@ -12,7 +12,7 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if library.catalog.hasPending { pendingBanner }
+            if library.hasPending { pendingBanner }
             TextField("Search client, shoot, camera, year", text: $library.query)
                 .textFieldStyle(.roundedBorder)
             results
@@ -32,8 +32,8 @@ struct LibraryView: View {
     // MARK: Pieces
 
     private var pendingBanner: some View {
-        let clients = library.catalog.pendingClients
-        let shoots = library.catalog.pendingShoots
+        let clients = library.pendingClients
+        let shoots = library.pendingShoots
         let drives = clients.map(\.driveID) + shoots.map(\.driveID)
         let driveNames = Set(drives.map(library.driveName)).sorted().joined(separator: ", ")
         let found = clients.isEmpty
@@ -296,7 +296,7 @@ struct LibraryReviewView: View {
     @ObservedObject var library: LibraryModel
 
     var body: some View {
-        let clients = library.catalog.pendingClients
+        let clients = library.pendingClients
         if !clients.isEmpty {
             step(title: "Which of these are clients?",
                  hint: "Ticked folders become clients, and their shoots come up next. Ones with dated shoot folders are ticked for you.",
@@ -307,7 +307,7 @@ struct LibraryReviewView: View {
                  done: { n in n == 0 ? "None are clients" : "Next: \(n) client\(n == 1 ? "" : "s")" },
                  finish: library.finishClients)
         } else {
-            let shoots = library.catalog.pendingShoots
+            let shoots = library.pendingShoots
             step(title: "Which of these are shoots?",
                  hint: "Folders with a date in the name are ticked for you. Untick things like brand kits or loose camera folders.",
                  items: shoots.map { shoot in

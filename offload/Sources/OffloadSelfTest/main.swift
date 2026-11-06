@@ -536,6 +536,8 @@ func catalogsDrivesAndAsksAboutUnknownShoots() throws {
     expect(catalog.shoots.map(\.name) == ["Spring launch"], "Offload's own shoot (and its client) logged straight away")
     expect(Set(catalog.pendingClients.map(\.name)) == ["ORBIT", "desk"], "other clients wait for review")
     expect(Set(catalog.pendingShoots.map(\.name)) == ["acme coast 12", "Brand kit"], "only confirmed clients' shoots are asked about")
+    expect(catalog.hasPending(on: ["T7"]) && !catalog.hasPending(on: ["Barra"])
+           && catalog.pendingClients(on: []).isEmpty, "unplugged drives aren't up for review")
 
     let orbit = catalog.pendingClients.first { $0.name == "ORBIT" }!.id
     catalog.answerClients(asked: Set(catalog.pendingClients.map(\.id)), yes: [orbit])

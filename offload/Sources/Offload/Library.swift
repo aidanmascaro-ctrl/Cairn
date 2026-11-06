@@ -49,6 +49,11 @@ final class LibraryModel: ObservableObject {
 
     var results: [CatalogShoot] { catalog.search(query) }
 
+    /// Review only covers plugged-in drives; the rest waits until they're back.
+    var pendingClients: [CatalogClient] { catalog.pendingClients(on: Set(mounted.keys)) }
+    var pendingShoots: [CatalogShoot] { catalog.pendingShoots(on: Set(mounted.keys)) }
+    var hasPending: Bool { catalog.hasPending(on: Set(mounted.keys)) }
+
     func driveName(_ id: String) -> String { catalog.drive(id)?.name ?? "Unknown drive" }
     func isOnline(_ shoot: CatalogShoot) -> Bool { mounted[shoot.driveID] != nil }
     func folder(of shoot: CatalogShoot) -> URL? { mounted[shoot.driveID]?.appendingPathComponent(shoot.path) }
@@ -79,6 +84,7 @@ final class LibraryModel: ObservableObject {
         let gone = mounted.filter { $0.value.standardizedFileURL == volume.standardizedFileURL }.map(\.key)
         gone.forEach { watchers[$0] = nil }
         mounted = mounted.filter { $0.value.standardizedFileURL != volume.standardizedFileURL }
+        if !hasPending { reviewing = false }
     }
 
     /// Re-reads the drive holding `folder`, e.g. after a copy landed there.
@@ -137,7 +143,7 @@ final class LibraryModel: ObservableObject {
     /// Step 1 of review: ticked folders become clients, unticked ones are never suggested again.
     /// Their shoots are then up for review in step 2.
     func finishClients() {
-        let asked = catalog.pendingClients
+        let asked = pendingClients
         let yes = Set(asked.filter(isTicked).map(\.id))
         flipped = []
         update { $0.answerClients(asked: Set(asked.map(\.id)), yes: yes) }
@@ -145,7 +151,7 @@ final class LibraryModel: ObservableObject {
 
     /// Step 2: ticked folders are shoots, unticked ones are never suggested again.
     func finishShoots() {
-        let asked = catalog.pendingShoots
+        let asked = pendingShoots
         let yes = Set(asked.filter(isTicked).map(\.id))
         flipped = []
         update { $0.answerShoots(asked: Set(asked.map(\.id)), yes: yes) }
@@ -158,7 +164,7 @@ final class LibraryModel: ObservableObject {
         change(&next)
         guard next != catalog else { return }
         catalog = next
-        if !catalog.hasPending { reviewing = false }
+        if !hasPending { reviewing = false }
         do {
             try catalog.save()
         } catch {

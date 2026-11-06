@@ -149,6 +149,20 @@ public struct Catalog: Codable, Sendable, Equatable {
 
     public var hasPending: Bool { !pendingClients.isEmpty || !pendingShoots.isEmpty }
 
+    /// What's up for review on the given drives only: renaming or ticking folders needs the
+    /// drive plugged in, so folders on drives that aren't wait until they are.
+    public func pendingClients(on drives: Set<String>) -> [CatalogClient] {
+        pendingClients.filter { drives.contains($0.driveID) }
+    }
+
+    public func pendingShoots(on drives: Set<String>) -> [CatalogShoot] {
+        pendingShoots.filter { drives.contains($0.driveID) }
+    }
+
+    public func hasPending(on drives: Set<String>) -> Bool {
+        !pendingClients(on: drives).isEmpty || !pendingShoots(on: drives).isEmpty
+    }
+
     // MARK: Scan results
 
     /// Replaces what's known about `drive` with a fresh scan, keeping every earlier yes/no.
