@@ -23,6 +23,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import ingest
 import resolve_api
 import sidecar
 
@@ -196,8 +197,11 @@ def build_timeline(shoot_folder: str | Path, name: str | None = None) -> dict[st
     with a clear error message instead.
     """
     folder = Path(shoot_folder).resolve()
-    if not folder.is_dir():
-        return _err(f"Shoot folder does not exist: {folder}")
+    try:
+        # Only reads the shoot's sidecars; everything it writes goes to Resolve.
+        ingest.preflight(folder, require_writable=False)
+    except ingest.IngestError as exc:
+        return _err(str(exc))
 
     classified = _classified_clips(folder)
     a_paths = classified["A-ROLL"]

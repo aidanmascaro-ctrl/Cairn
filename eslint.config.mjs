@@ -36,7 +36,7 @@ export default tseslint.config(
   },
   {
     // Plain JS files (main.js, preload.js, trainer) — CommonJS, type-checked rules don't apply
-    files: ["src/orchestrator/*.js", "packaging/**/*.js", "tools/**/*.js"],
+    files: ["src/orchestrator/*.js", "packaging/**/*.js", "tools/**/*.{js,mjs}"],
     languageOptions: {
       globals: { ...globals.node, ...globals.browser },
     },

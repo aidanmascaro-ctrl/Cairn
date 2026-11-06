@@ -98,6 +98,8 @@ def handle_classify_confirm(msg: dict[str, Any]) -> dict[str, Any]:
     label: str = payload["label"]
     shoot_folder: str = payload["shoot_folder"]
 
+    ingest_worker.preflight(Path(shoot_folder))
+
     sidecar.merge_clip(
         shoot_folder,
         clip_path,
@@ -487,6 +489,9 @@ def handle_classify(msg: dict[str, Any]) -> Iterator[dict[str, Any]]:
 
     path: str = payload["path"]
     dry_run: bool = bool(payload.get("dry_run", False))
+
+    # A dry run writes no sidecars, so it can read a locked or archived shoot.
+    ingest_worker.preflight(Path(path), require_writable=not dry_run)
 
     clip_paths = classify_worker.scan_video_clips(path)
     total = len(clip_paths)

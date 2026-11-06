@@ -71,7 +71,7 @@ SKIP_NAMES = {
     "System Volume Information",
 }
 
-SYSTEM_PATH_PREFIXES = ["/System/", "/Windows/", "/Program Files/"]
+SYSTEM_PATH_PREFIXES = ["/System/", "/Windows/", "/Program Files/", "/Program Files (x86)/"]
 
 
 # ── DJI detection ────────────────────────────────────────────────────────────
@@ -472,18 +472,24 @@ class IngestError(Exception):
     pass
 
 
-def preflight(folder: Path) -> None:
+def is_system_path(abs_path: str) -> bool:
+    """True for an absolute macOS or Windows path at or under a system location."""
+    normalised = abs_path.replace("\\", "/").casefold()
+    without_drive = re.sub(r"^(//\?/)?[a-z]:", "", normalised)
+    return any(f"{without_drive}/".startswith(p.casefold()) for p in SYSTEM_PATH_PREFIXES)
+
+
+def preflight(folder: Path, require_writable: bool = True) -> None:
+    """Reject paths Cairn must not work in. Raises IngestError with the reason."""
     if not folder.exists():
         raise IngestError(f"Path does not exist: {folder}")
     if not folder.is_dir():
         raise IngestError(f"Path is not a directory: {folder}")
 
-    abs_str = str(folder.resolve())
-    for prefix in SYSTEM_PATH_PREFIXES:
-        if abs_str.startswith(prefix):
-            raise IngestError(f"Refusing to organise a system path: {folder}")
+    if is_system_path(str(folder.resolve())):
+        raise IngestError(f"Refusing to use a system path: {folder}")
 
-    if not os.access(folder, os.W_OK):
+    if require_writable and not os.access(folder, os.W_OK):
         raise IngestError(f"Path is not writable: {folder}")
 
 
