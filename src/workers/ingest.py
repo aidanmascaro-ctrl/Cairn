@@ -125,7 +125,10 @@ OFFLOAD_MANIFEST = Path(".cairn") / "offload.json"
 
 
 def is_offload_shoot(folder: str | Path) -> bool:
-    """A shoot copied off a card by the Offload menu-bar app (offload/ in this repo)."""
+    """A shoot copied off a card by the Offload menu-bar app.
+
+    Offload lives in its own repo; the contract is specs/offload-handoff.md.
+    """
     return (Path(folder) / OFFLOAD_MANIFEST).is_file()
 
 

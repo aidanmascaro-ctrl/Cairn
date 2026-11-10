@@ -388,7 +388,8 @@ async function validateKey(type, key) {
 }
 
 // ── Offload inbox ─────────────────────────────────────────────────────────────
-// The Offload menu-bar app (offload/ in this repo) copies + verifies a card, then
+// The Offload menu-bar app (its own repo; contract in specs/offload-handoff.md)
+// copies + verifies a card, then
 // appends the shoot to this inbox. Cairn lists them as "ready to sort" and drops
 // the entry once the shoot has been ingested.
 

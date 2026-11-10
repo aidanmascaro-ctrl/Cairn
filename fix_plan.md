@@ -74,7 +74,6 @@ Each entry:
   - Offload camera-folder counts are spread into the progress event (`**resolve_counts`); a folder named `type`/`event`/`total` would clash. Nest them.
   - Leftover hard-coded colours after the restyle: `ClassifyPanel .review-item`, `DropZone .pick-btn`, `.offload-inbox`/`.sort-btn` blues.
   - `packaging/build-mac.sh` silently skips a missing node module (`if [[ -d … ]]`); make it fail the build.
-  - Offload: `DriveIndex.copies(of:)` fingerprints every same-size candidate (slower scans); Sort is disabled while any camera folder is unchecked, including Gyroflow-only folders.
   - Resolve media paths and sidecars go stale if Offload re-sorts a shoot after it was ingested (`Handoff.relocate` only fixes the manifest and inbox).
 - **Next step:** pick off as convenient; none block current use.
 
@@ -164,18 +163,12 @@ Each entry:
 - **Fix:** route the whole import through the single bridge worker — `main.js` now passes `resolve: true` and lets `handle_ingest` do org + the proper Cairn bin-tree import in one streamed call. Deleted `importFolderToResolve` / `importViaResolveScript` (the second-process spawn) and the dead `scanDir`/`VIDEO_EXTS`/`PHOTO_EXTS`. Handler now throws on a non-`ingest_complete` terminal message so a bridge error surfaces in the UI instead of a hollow "done". `resolve_import.py` tombstoned (inert) so the wrong pattern can't be re-introduced.
 - **Verification:** new `tests/python/test_resolve_api.py` (bin tree, routing, dedup, JPEG-stills, no-project guard) — 5 pass; full suite 119 pass; eslint/tsc/vitest/ruff/pyrefly clean; live MCP test of the real `resolve_api` bin calls on Resolve 21.0.0.48.
 
-## Offload (card offload, `offload/`) — open items · 2026-10-26
+## Offload handoff (Cairn side) — open items · 2026-10-26
 
-Native Swift menu-bar app modelled on thebackedapp.com: card in → "N of M files aren't on <drive> yet" (content-matched) → New shoot (Client / dd.MM.yy Shoot / Footage/<Camera>, Photos, Project) → verified copy (SHA-256 read-back) → writes `<shoot>/.cairn/offload.json` + `~/Library/Application Support/Cairn/offload-inbox.json`. Build: `cd offload && swift build`; checks: `swift run OffloadSelfTest` (no Xcode on this Mac, so no XCTest / swift-testing / SwiftUI `@State`).
+Offload itself moved to its own repo on 2026-11-10 (its open items went to its `fix_plan.md`). The contract between the two is `specs/offload-handoff.md`.
 
 - [x] **Cairn side of the hand-off** — DropZone lists "Ready from Offload" (polls `cairn:offload:inbox` every 10s + on focus); Sort runs `cairn:ingest` on the shoot and `cairn:offload:done` drops the entry.
 - [x] **Layout clash** — `ingest.run()` detects `<shoot>/.cairn/offload.json` and imports **in place** (no rename/moves). Resolve bins: `Cairn/Footage/<Camera>` per camera folder + `Cairn/Photos` (`resolve_api.ingest_offload_into_resolve`). Clip sidecars go in `<shoot>/.cairn/` (`sidecar.sidecar_root`); classify scans `Footage/*/`. Tests: `tests/python/test_offload_ingest.py`.
 - [x] **Offload Resolve import live-tested** (2026-10-26, Resolve 21.1.0.14): 2 real clips → `Master/Cairn/Footage/FX3` + `.../A7S3`, 1 clip each; re-run imported 0 (dedup OK). Test bins deleted after.
 - [x] **Clip metadata silently dropped (all ingests, not just Offload).** Fixed 2026-10-27. Ingest now writes `Camera Type` / `Date Recorded` / `Lens Type` (Resolve fields), and Cairn's own keys (`Cairn Stage`, `Cairn Classification`) go through `SetThirdPartyMetadata` — `SetMetadata` refuses any non-Resolve field name, so classify's A/B label was being dropped too. `set_clip_metadata` returns the refused keys; the bridge streams a `metadata_refused` event shown as ⚠ in the ingest log. Offload bins get their camera folder name as Camera Type. Verified live on Resolve 21.1 with the real function. Re-ingest also fills **blank** fields on clips already in the bin (`_import_and_tag`), never overwriting an editor's value or a later Cairn Stage; backfilled the 67 clips of `261015 2 harvest dinner` live (22 FX30 + 45 vid, 0 re-imported).
 - [ ] **Timeline build on Offload shoots** — `timeline.py` untested with the Footage/<Camera> layout.
-- [ ] **Downloads sorting** (music / VO / LUTs → shoot Assets) — not built.
-- [x] **.app bundle** — `offload/bundle.sh` → `offload/build/Offload.app` (LSUIElement, ad-hoc signed). Must be launched via `open`/Finder: a binary started from a shell gets DiskArbitration `kDAReturnNotPrivileged` on eject.
-- [x] **Start at login** — `bundle.sh` installs to `~/Applications/Offload.app`; first launch from there registers an SMAppService login item once (switching it off in System Settings sticks).
-- [ ] **Eject not yet confirmed from Offload.app** — DiskArbitration path built; needs one real card.
-- [ ] **Non-Sony camera detection** — only Sony XML serials read; DJI/Canon/BMD fall back to "Camera".
-- [ ] **Not tested on a real card** — logic verified on temp files only.
