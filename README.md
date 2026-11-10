@@ -6,7 +6,7 @@
 
 Cairn takes the tedious part out of the start of every edit. It's a plugin inside DaVinci Resolve Studio that takes a shoot from your drive, sorts the footage into A-roll and B-roll, colour-codes it, lays out an assembly timeline and pulls the usable moments.
 
-It pairs with **Offload**, a separate Mac menu-bar app (its own repo) that copies your camera cards onto your drive, proves every file arrived intact, and hands each shoot to Cairn. Cairn doesn't need it: any shoot folder works. How the two talk is in [`specs/offload-handoff.md`](specs/offload-handoff.md).
+It pairs with **Offload**, a separate Mac menu-bar app ([its own repo](https://github.com/aidanmascaro-ctrl/Offload)) that copies your camera cards onto your drive, proves every file arrived intact, and hands each shoot to Cairn. Cairn doesn't need it: any shoot folder works. How the two talk is in [`specs/offload-handoff.md`](specs/offload-handoff.md).
 
 Cairn never cuts your video. It does the logging and the sorting, so you can start on the creative work.
 
