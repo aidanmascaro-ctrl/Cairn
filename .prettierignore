@@ -3,5 +3,4 @@ graphify-out/
 dist/
 node_modules/
 packaging/dist/
-offload/.build/
 handoffs/
